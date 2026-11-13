@@ -34,3 +34,5 @@ Change a shared file only when the shared contract itself must change, and coord
 | Event | Sender | Detail | Meaning |
 | --- | --- | --- | --- |
 | `ready` | Shared runtime | none | All owner setup functions have completed |
+| `rider:input` | Mobile/gamepad controls | `{ carve: -1..1, crouch: 0..1 }` | Supplies normalized non-keyboard rider input |
+| `rider:update` | Rider Feel | `{ state, pose, input, camera }` | Publishes the latest physics state, chase camera, and procedural animation pose; world renderers run during this event before the rider is drawn |
