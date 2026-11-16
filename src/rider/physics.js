@@ -4,6 +4,8 @@ const MAX_STEP = 1 / 20;
 const EDGE_RESPONSE = 8;
 const TURN_STRENGTH = 1.7;
 const MAX_HEADING = 1.15;
+const GRAVITY = 18;
+const JUMP_VELOCITY = 7.8;
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -24,11 +26,13 @@ export function createRiderState(overrides = {}) {
     edge: clamp(finiteOr(overrides.edge, 0), -1, 1),
     elapsed: Math.max(0, finiteOr(overrides.elapsed, 0)),
     heading: finiteOr(overrides.heading, 0),
+    air: Math.max(0, finiteOr(overrides.air, 0)),
     position: {
       across: finiteOr(position.across, 0),
       downhill: finiteOr(position.downhill, 0),
     },
     speed: Math.max(0, finiteOr(overrides.speed, 8)),
+    verticalVelocity: finiteOr(overrides.verticalVelocity, 0),
   });
 }
 
@@ -56,8 +60,24 @@ export function stepRider(state, input = {}, deltaSeconds = 0) {
     MAX_SPEED,
   );
   const distance = speed * delta;
+  const canJump = state.air <= 0 && finiteOr(input.jump, 0) > 0;
+  let verticalVelocity = canJump
+    ? JUMP_VELOCITY
+    : finiteOr(state.verticalVelocity, 0);
+  let air = Math.max(0, finiteOr(state.air, 0));
+
+  if (air > 0 || verticalVelocity > 0) {
+    air += verticalVelocity * delta;
+    verticalVelocity -= GRAVITY * delta;
+
+    if (air <= 0) {
+      air = 0;
+      verticalVelocity = 0;
+    }
+  }
 
   return freezeState({
+    air,
     edge,
     elapsed: state.elapsed + delta,
     heading,
@@ -66,5 +86,6 @@ export function stepRider(state, input = {}, deltaSeconds = 0) {
       downhill: state.position.downhill + Math.cos(heading) * distance,
     },
     speed,
+    verticalVelocity,
   });
 }

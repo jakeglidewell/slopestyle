@@ -25,6 +25,12 @@ export default async function setupRider(game) {
     });
   });
 
+  game.events.addEventListener("rider:reset", () => {
+    camera = createCameraState();
+    previousTimestamp = undefined;
+    state = createRiderState();
+  });
+
   const update = (timestamp) => {
     const keyboardInput = keyboard.read();
     const input = Object.freeze({
