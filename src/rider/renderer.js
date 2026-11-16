@@ -62,13 +62,14 @@ export function createRiderRenderer(
       const viewportScale = clamp(canvas.width / 480, 0.8, 1.6);
       const cameraLag =
         (state.position.across - camera.position.across) * 14;
+      const jumpLift = (state.air ?? 0) * 18;
 
       drawLowPolyRider(context, buildLowPolyRider(pose), {
         palette,
         rotation: clamp(pose.boardYaw * 0.3, -0.35, 0.35),
         scale: viewportScale,
         x: canvas.width / 2 + cameraLag,
-        y: canvas.height * 0.78,
+        y: canvas.height * 0.78 - jumpLift,
       });
     },
   });

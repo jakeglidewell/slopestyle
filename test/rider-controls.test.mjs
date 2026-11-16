@@ -31,13 +31,28 @@ test("releasing a key releases its carve input", () => {
   assert.equal(controls.read().carve, 0);
 });
 
-test("down and space control the crouch input", () => {
+test("down controls the crouch input", () => {
+  const target = new EventTarget();
+  const controls = createKeyboardControls(target);
+
+  target.dispatchEvent(keyEvent("keydown", "ArrowDown"));
+
+  assert.equal(controls.read().crouch, 1);
+});
+
+test("space and up queue a jump input once per press", () => {
   const target = new EventTarget();
   const controls = createKeyboardControls(target);
 
   target.dispatchEvent(keyEvent("keydown", "Space"));
 
-  assert.equal(controls.read().crouch, 1);
+  assert.equal(controls.read().jump, 1);
+  assert.equal(controls.read().jump, 0);
+
+  target.dispatchEvent(keyEvent("keyup", "Space"));
+  target.dispatchEvent(keyEvent("keydown", "ArrowUp"));
+
+  assert.equal(controls.read().jump, 1);
 });
 
 test("destroy detaches keyboard listeners", () => {
