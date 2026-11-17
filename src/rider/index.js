@@ -36,6 +36,7 @@ export default async function setupRider(game) {
     const input = Object.freeze({
       carve: clamp(keyboardInput.carve + externalInput.carve, -1, 1),
       crouch: Math.max(keyboardInput.crouch, externalInput.crouch),
+      jump: keyboardInput.jump,
     });
     const deltaSeconds =
       previousTimestamp === undefined ? 0 : (timestamp - previousTimestamp) / 1_000;
