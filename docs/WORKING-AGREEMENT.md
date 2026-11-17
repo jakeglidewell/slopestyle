@@ -10,6 +10,12 @@ The shared shell should stay small and stable. Feature work belongs in the owner
 | Mountain & Content | `src/mountain/` | Course generation, obstacles, pickups, environment |
 | Game Loop & Polish | `src/game-loop/` | Flow, HUD, scoring, audio, deployment, mobile input |
 
+## PRD implementation lanes
+
+| Lane | Responsibility | Scope |
+| --- | --- | --- |
+| **3 — Game Loop & Polish** | Player-facing experience and integration | Start/restart flow, HUD, scoring, high scores, sound, deployment, performance and mobile controls |
+
 ## Shared contract
 
 Every owner entry module exports one async setup function. It receives a frozen `game` object with:
