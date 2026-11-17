@@ -24,3 +24,80 @@ test("explicit crouch input blends with the procedural carve pose", () => {
 
   assert.ok(tucked.crouch > automatic.crouch);
 });
+
+test("a rising jump extends the rider out of the crouch", () => {
+  const pose = getRiderPose(
+    createRiderState({ air: 0.8, verticalVelocity: 5 }),
+  );
+
+  assert.ok(pose.airborne > 0 && pose.jumpStretch > 0);
+});
+
+test("the rider tucks near the top of a jump", () => {
+  const rising = getRiderPose(
+    createRiderState({ air: 0.5, verticalVelocity: 5 }),
+  );
+  const apex = getRiderPose(
+    createRiderState({ air: 1.5, verticalVelocity: 0 }),
+  );
+
+  assert.ok(apex.crouch > rising.crouch);
+});
+
+test("landing compression visibly lowers the rider stance", () => {
+  const neutral = getRiderPose(createRiderState({ compression: 0 }));
+  const landing = getRiderPose(createRiderState({ compression: 1 }));
+
+  assert.ok(landing.crouch > neutral.crouch);
+});
+
+test("a skidding board slips across the direction of travel", () => {
+  const pose = getRiderPose(
+    createRiderState({ edge: 1, skid: 0.7, slipAngle: 0.3 }),
+  );
+
+  assert.ok(pose.boardSlip > 0.1);
+});
+
+test("an edge catch tips the rider onto the snow", () => {
+  const pose = getRiderPose(
+    createRiderState({ crashed: true, crashSpin: 1 }),
+  );
+
+  assert.ok(Math.abs(pose.fallRotation) > 0.8);
+});
+
+test("powder produces more terrain heave than ice", () => {
+  const powder = getRiderPose(
+    createRiderState({ elapsed: 1.3, speed: 14, surface: "powder" }),
+  );
+  const ice = getRiderPose(
+    createRiderState({ elapsed: 1.3, speed: 14, surface: "ice" }),
+  );
+
+  assert.ok(Math.abs(powder.bob) > Math.abs(ice.bob));
+});
+
+test("the park stance stays low even without active input", () => {
+  const pose = getRiderPose(createRiderState());
+
+  assert.ok(pose.crouch >= 0.25);
+});
+
+test("an airborne shifty moves the board more than the torso", () => {
+  const pose = getRiderPose(
+    createRiderState({ air: 1, tweak: 0.9 }),
+    { steer: 1 },
+  );
+
+  assert.ok(Math.abs(pose.boardTweak) > Math.abs(pose.upperBodyTwist) * 3);
+});
+
+test("a deep low carve reaches for a hand drag", () => {
+  const pose = getRiderPose(
+    createRiderState({ edge: 1, lean: 1 }),
+    { crouch: 1 },
+  );
+
+  assert.ok(pose.handDrag > 0.5);
+});

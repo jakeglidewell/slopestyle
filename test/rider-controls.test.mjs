@@ -9,7 +9,7 @@ const keyEvent = (type, code) => {
   return event;
 };
 
-test("left and right keys produce normalized carve input", () => {
+test("left and right arrows produce normalized flick input", () => {
   const target = new EventTarget();
   const controls = createKeyboardControls(target);
 
@@ -18,17 +18,22 @@ test("left and right keys produce normalized carve input", () => {
   target.dispatchEvent(keyEvent("keydown", "ArrowLeft"));
   const cancelled = controls.read();
 
-  assert.deepEqual([right.carve, cancelled.carve], [1, 0]);
+  assert.deepEqual([right.steer, cancelled.steer], [1, 0]);
 });
 
-test("releasing a key releases its carve input", () => {
+test("A and D produce carving without adding a flick", () => {
   const target = new EventTarget();
   const controls = createKeyboardControls(target);
 
-  target.dispatchEvent(keyEvent("keydown", "KeyA"));
-  target.dispatchEvent(keyEvent("keyup", "KeyA"));
+  target.dispatchEvent(keyEvent("keydown", "KeyD"));
+  const turning = controls.read();
+  target.dispatchEvent(keyEvent("keyup", "KeyD"));
+  const released = controls.read();
 
-  assert.equal(controls.read().carve, 0);
+  assert.deepEqual(
+    [turning.carve, turning.steer, released.carve],
+    [1, 0, 0],
+  );
 });
 
 test("down controls the crouch input", () => {
@@ -62,5 +67,5 @@ test("destroy detaches keyboard listeners", () => {
 
   target.dispatchEvent(keyEvent("keydown", "ArrowRight"));
 
-  assert.equal(controls.read().carve, 0);
+  assert.equal(controls.read().steer, 0);
 });
