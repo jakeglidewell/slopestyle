@@ -28,6 +28,26 @@ const traceEdge = (context, canvas, riderAcross, side) => {
   }
 };
 
+const drawSnowBank = (context, canvas, riderAcross, side) => {
+  context.beginPath();
+  traceEdge(context, canvas, riderAcross, side);
+  for (let step = 28; step >= 0; step -= 1) {
+    const y = canvas.height * (0.22 + (0.78 * step) / 28);
+    const depth = step / 28;
+    const thickness = canvas.width * (0.006 + depth * 0.025);
+    context.lineTo(slopeX(canvas, y, riderAcross, side) + side * thickness, y);
+  }
+  context.closePath();
+  context.fillStyle = "#d2eefa";
+  context.fill();
+
+  context.beginPath();
+  traceEdge(context, canvas, riderAcross, side);
+  context.strokeStyle = "#f7fdff";
+  context.lineWidth = Math.max(4, canvas.width * 0.007);
+  context.stroke();
+};
+
 const drawMountainLayer = (context, canvas, peaks, base, color, snowcap) => {
   for (const [center, height, width] of peaks) {
     const x = canvas.width * center;
@@ -74,7 +94,7 @@ const drawBackground = (context, canvas, riderAcross) => {
     0.49, "#c4e0e9", "#ffffff",
   );
 
-  context.fillStyle = "#e5f6fc";
+  context.fillStyle = "#dceff8";
   context.fillRect(0, canvas.height * 0.45, canvas.width, canvas.height);
 
   // The playable surface is intentionally plain so hazards remain readable.
@@ -87,6 +107,10 @@ const drawBackground = (context, canvas, riderAcross) => {
   }
   context.closePath();
   context.fill();
+
+  for (const side of [-1, 1]) {
+    drawSnowBank(context, canvas, riderAcross, side);
+  }
 
   for (const side of [-1, 1]) {
     context.beginPath();
@@ -124,6 +148,81 @@ const drawSnowTexture = (context, canvas, riderAcross, travel, surface, speed) =
     context.stroke();
   }
   context.restore();
+};
+
+const trailPoint = (canvas, riderAcross, travel, sample) => {
+  const behind = Math.max(0, travel - sample.downhill);
+  const y = canvas.height * 0.78 + behind * Math.max(3.5, canvas.height * 0.006);
+  const x = canvas.width / 2 +
+    ((sample.across - riderAcross) / COURSE.halfWidth) * slopeHalfAtY(canvas, y);
+  return { x, y, behind };
+};
+
+const drawPowderTrail = (context, canvas, riderAcross, travel, samples) => {
+  if (samples.length < 2) return;
+
+  const points = samples
+    .map((sample) => trailPoint(canvas, riderAcross, travel, sample))
+    .filter((point) => point.y <= canvas.height + 25);
+  if (points.length < 2) return;
+
+  // A soft displaced-snow channel with loose powder on both sides.
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  for (const [width, color] of [
+    [34, "rgba(128, 199, 225, 0.22)"],
+    [25, "rgba(244, 252, 255, 0.95)"],
+  ]) {
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+    context.strokeStyle = color;
+    context.lineWidth = width * screenUnit(canvas);
+    context.stroke();
+  }
+
+  for (let index = 0; index < points.length; index += 2) {
+    const point = points[index];
+    const freshness = clamp(1 - point.behind / 32, 0, 1);
+    const spread = (18 + (index % 3) * 6) * screenUnit(canvas);
+    const radius = (5 + (index % 4) * 1.5) * screenUnit(canvas) * freshness;
+    if (radius < 0.5) continue;
+    for (const side of [-1, 1]) {
+      context.fillStyle = `rgba(119, 190, 218, ${0.34 * freshness})`;
+      context.beginPath();
+      context.arc(point.x + side * spread, point.y + radius * 0.4, radius * 1.35, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = `rgba(255, 255, 255, ${0.9 * freshness})`;
+      context.beginPath();
+      context.arc(point.x + side * spread, point.y, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+};
+
+const drawSnowSpray = (context, canvas, carve, travel) => {
+  const unit = screenUnit(canvas);
+  const centerX = canvas.width / 2;
+  const baseY = canvas.height * 0.78;
+  const force = clamp(Math.abs(carve), 0, 1);
+
+  for (const side of [-1, 1]) {
+    const sideForce = 0.55 + (side * carve > 0 ? force * 0.95 : force * 0.35);
+    for (let index = 0; index < 9; index += 1) {
+      const phase = (travel * 2.6 + index * 0.73) % 9;
+      const x = centerX + side * (24 + phase * (4.5 + force * 3)) * unit;
+      const y = baseY + (phase * 2.7 + Math.sin(index * 2.1) * 4) * unit;
+      const radius = (3 + (9 - phase) * 0.7) * unit * sideForce;
+      context.fillStyle = "rgba(119, 190, 218, 0.28)";
+      context.beginPath();
+      context.arc(x, y + radius * 0.4, radius * 1.25, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = "rgba(255, 255, 255, 0.94)";
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
 };
 
 const drawPine = (context, x, y, size) => {
@@ -322,6 +421,7 @@ export default async function setupMountain(game) {
   if (!context) throw new Error("Mountain rendering requires a 2D canvas context");
 
   let travel = 0;
+  let trail = [];
   let course = { hazards: [], phase: "idle" };
 
   game.events.addEventListener("course:update", (event) => {
@@ -336,8 +436,17 @@ export default async function setupMountain(game) {
     const camera = event.detail?.camera;
     const riderAcross = Number(riderState?.position?.across) || 0;
     const downhill = Number(riderState?.position?.downhill) || 0;
-    if (course.phase === "idle") travel = 0;
-    else if (course.phase === "running") travel = Math.max(0, downhill);
+    if (course.phase === "idle") {
+      travel = 0;
+      trail = [];
+    } else if (course.phase === "running") {
+      travel = Math.max(0, downhill);
+      if ((riderState?.air ?? 0) < 0.08 &&
+          (trail.length === 0 || travel - trail.at(-1).downhill >= 0.45)) {
+        trail.push({ across: riderAcross, downhill: travel });
+      }
+      trail = trail.filter((sample) => travel - sample.downhill < 42);
+    }
 
     context.save();
     context.translate(game.canvas.width / 2, game.canvas.height / 2);
@@ -352,6 +461,10 @@ export default async function setupMountain(game) {
       riderState?.surface ?? "powder",
       Number(riderState?.speed) || 0,
     );
+    drawPowderTrail(context, game.canvas, riderAcross, travel, trail);
+    if (course.phase === "running" && (riderState?.air ?? 0) < 0.08) {
+      drawSnowSpray(context, game.canvas, Number(event.detail?.input?.carve) || 0, travel);
+    }
     drawSideScenery(context, game.canvas, riderAcross, travel);
     drawHazards(context, game.canvas, riderAcross, course.hazards);
     context.restore();
