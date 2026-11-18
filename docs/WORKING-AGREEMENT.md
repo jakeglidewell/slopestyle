@@ -34,5 +34,8 @@ Change a shared file only when the shared contract itself must change, and coord
 | Event | Sender | Detail | Meaning |
 | --- | --- | --- | --- |
 | `ready` | Shared runtime | none | All owner setup functions have completed |
-| `rider:input` | Mobile/gamepad controls | `{ carve: -1..1, crouch: 0..1 }` | Supplies normalized non-keyboard rider input |
+| `rider:input` | Mobile/gamepad controls | `{ steer: -1..1, carve: -1..1, crouch: 0..1, jump: 0..1 }` | Supplies normalized non-keyboard rider input; steer pivots the board, carve controls lean/edge, and jump is consumed once |
 | `rider:update` | Rider Feel | `{ state, pose, input, camera }` | Publishes the latest physics state, chase camera, and procedural animation pose; world renderers run during this event before the rider is drawn |
+| `rider:surface` | Mountain & Content | `{ surface, slopeGrade? }` | Changes snow physics; surface is `groomed`, `ice`, `powder`, `slush`, or `rail` |
+| `rider:stance` | Game Loop & Polish | `{ stance }` | Selects `regular` or `goofy` stance without changing the control directions |
+| `rider:crash` | Rider Feel | rider state | Announces edge catches, bad landings, and rail slip-outs |

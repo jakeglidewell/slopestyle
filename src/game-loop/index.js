@@ -4,8 +4,9 @@
 import { COURSE } from "../mountain/index.js";
 
 const STORAGE_KEY = "slopestyle.bestDistance";
-const START_SPEED = 12;
-const MAX_SPEED = 32;
+const START_SPEED = 16;
+const MIN_COURSE_SPEED = 12;
+const MAX_SPEED = 34;
 const SPEED_PER_DODGE = 0.62;
 const REWARD_EVERY = 10;
 const REWARD_DROP = 3.2;
@@ -14,6 +15,16 @@ const HIT_WINDOW = 1.25;
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
+
+export const courseSpeedForRider = (riderState) => {
+  const downhillSpeed = Number.isFinite(riderState?.velocity?.downhill)
+    ? riderState.velocity.downhill
+    : Number(riderState?.speed) || 0;
+
+  return riderState?.crashed
+    ? Math.max(0, downhillSpeed)
+    : Math.max(MIN_COURSE_SPEED, downhillSpeed);
+};
 
 const randomBetween = (minimum, maximum) =>
   minimum + Math.random() * (maximum - minimum);
@@ -276,7 +287,7 @@ export default async function setupGameLoop(game) {
         <h1>Slopestyle</h1>
         <p>Carve down the mountain, jump fallen logs, duck overhead hazards, and survive as long as you can.</p>
         <button class="primary-action" type="button" data-start>Start</button>
-        <p class="run-note">Steer with A/D or arrow keys. Jump with Space or Up. Duck with Down.</p>
+        <p class="run-note">Carve with A/D. Snap quick tail flicks with Left/Right. Jump with Space or Up. Duck with Down.</p>
       </div>
     `;
     game.overlayRoot.querySelector("[data-start]").addEventListener("click", startRun, {
@@ -314,7 +325,9 @@ export default async function setupGameLoop(game) {
     lastFrameAt = undefined;
     lastJumpValue = 0;
     game.overlayRoot.innerHTML = "";
-    game.events.dispatchEvent(new Event("rider:reset"));
+    game.events.dispatchEvent(
+      new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
+    );
     dispatchCourse();
     audio.startTheme();
   };
@@ -323,7 +336,9 @@ export default async function setupGameLoop(game) {
     state = emptyRunState(state.best);
     lastFrameAt = undefined;
     lastJumpValue = 0;
-    game.events.dispatchEvent(new Event("rider:reset"));
+    game.events.dispatchEvent(
+      new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
+    );
     dispatchCourse();
     hud.update(state);
     showIdle();
@@ -381,6 +396,7 @@ export default async function setupGameLoop(game) {
 
   const updateRunning = (detail, delta) => {
     const { input, state: riderState } = detail;
+    const courseSpeed = courseSpeedForRider(riderState);
 
     if (Math.abs(riderState.position.across) > COURSE.halfWidth) {
       endRun("cliff");
@@ -396,8 +412,9 @@ export default async function setupGameLoop(game) {
       audio.carve(Math.abs(riderState.edge));
     }
 
-    state.distance += state.speed * delta;
-    state.spawnLeft -= state.speed * delta;
+    state.speed = riderState.speed;
+    state.distance += courseSpeed * delta;
+    state.spawnLeft -= courseSpeed * delta;
     state.rewardTimer = Math.max(0, state.rewardTimer - delta);
 
     if (state.distance > state.best && !state.celebratedBest) {
@@ -414,7 +431,7 @@ export default async function setupGameLoop(game) {
     }
 
     for (const hazard of state.hazards) {
-      hazard.z -= state.speed * delta;
+      hazard.z -= courseSpeed * delta;
 
       if (hasCollision(hazard, riderState, input)) {
         endRun("hazard");

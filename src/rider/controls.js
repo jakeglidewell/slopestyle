@@ -49,17 +49,20 @@ export function createKeyboardControls(target = window) {
       target.removeEventListener("blur", handleBlur);
     },
     read() {
-      const left = pressed.has("ArrowLeft") || pressed.has("KeyA");
-      const right = pressed.has("ArrowRight") || pressed.has("KeyD");
+      const steerLeft = pressed.has("ArrowLeft");
+      const steerRight = pressed.has("ArrowRight");
+      const carveLeft = pressed.has("KeyA");
+      const carveRight = pressed.has("KeyD");
       const crouch = pressed.has("ArrowDown");
       const jump = queuedJump;
 
       queuedJump = false;
 
       return Object.freeze({
-        carve: Number(right) - Number(left),
+        carve: Number(carveRight) - Number(carveLeft),
         crouch: Number(crouch),
         jump: Number(jump),
+        steer: Number(steerRight) - Number(steerLeft),
       });
     },
   });

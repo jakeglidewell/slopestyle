@@ -25,6 +25,7 @@ test("the rider loop publishes state and draws a low-poly frame", async (context
     beginPath() {},
     clearRect() {},
     closePath() {},
+    ellipse() {},
     fill() {
       fillCount += 1;
     },
@@ -53,5 +54,15 @@ test("the rider loop publishes state and draws a low-poly frame", async (context
   game.events.dispatchEvent(new Event("ready"));
   frames.shift()(0);
 
-  assert.ok(update.state && update.pose && update.camera && fillCount === 9);
+  const jumpEvent = new Event("keydown", { cancelable: true });
+  Object.defineProperty(jumpEvent, "code", { value: "Space" });
+  globalThis.window.dispatchEvent(jumpEvent);
+  frames.shift()(16);
+
+  assert.ok(
+    update.state.air > 0 &&
+      update.pose.airborne > 0 &&
+      update.camera &&
+      fillCount >= 18,
+  );
 });
