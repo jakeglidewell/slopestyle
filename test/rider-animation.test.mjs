@@ -78,6 +78,19 @@ test("powder produces more terrain heave than ice", () => {
   assert.ok(Math.abs(powder.bob) > Math.abs(ice.bob));
 });
 
+test("a powder bump compresses the knees and pitches the board", () => {
+  const neutral = getRiderPose(createRiderState({ surface: "powder" }));
+  const bump = getRiderPose(
+    createRiderState({
+      bumpImpact: 0.9,
+      surface: "powder",
+      terrainPitch: 0.35,
+    }),
+  );
+
+  assert.ok(bump.crouch > neutral.crouch && bump.boardPitch > neutral.boardPitch);
+});
+
 test("the park stance stays low even without active input", () => {
   const pose = getRiderPose(createRiderState());
 
@@ -91,6 +104,15 @@ test("an airborne shifty moves the board more than the torso", () => {
   );
 
   assert.ok(Math.abs(pose.boardTweak) > Math.abs(pose.upperBodyTwist) * 3);
+});
+
+test("holding crouch in the air reaches down for a grab", () => {
+  const pose = getRiderPose(
+    createRiderState({ air: 1, verticalVelocity: 0 }),
+    { crouch: 1 },
+  );
+
+  assert.ok(pose.grab > 0.5);
 });
 
 test("a deep low carve reaches for a hand drag", () => {

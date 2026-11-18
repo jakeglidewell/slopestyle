@@ -103,6 +103,29 @@ const drawBackground = (context, canvas, riderAcross) => {
   }
 };
 
+const drawSnowTexture = (context, canvas, riderAcross, travel, surface, speed) => {
+  const spacing = surface === "powder" ? 3.4 : 1.7;
+  const firstMark = Math.floor(travel / spacing) * spacing;
+  const strong = surface === "ice" ? 0.06 : surface === "powder" ? 0.11 : 0.16;
+
+  context.save();
+  context.strokeStyle = surface === "ice" ? "#84c5dd" : "#83c4d7";
+  for (let worldZ = firstMark; worldZ < travel + COURSE.spawnDistance; worldZ += spacing) {
+    const z = worldZ - travel;
+    if (z < 0.5 || z > COURSE.spawnDistance) continue;
+    const left = projectCoursePoint(canvas, riderAcross, { x: -COURSE.halfWidth * 0.87, z }, COURSE);
+    const right = projectCoursePoint(canvas, riderAcross, { x: COURSE.halfWidth * 0.87, z }, COURSE);
+    const ripple = Math.sin(worldZ * 0.91) * 2.5 * left.scale;
+    context.globalAlpha = strong * left.alpha * (0.65 + Math.min(speed / 34, 1) * 0.35);
+    context.lineWidth = Math.max(0.7, left.scale * (surface === "powder" ? 2 : 1.15));
+    context.beginPath();
+    context.moveTo(left.x, left.y);
+    context.quadraticCurveTo((left.x + right.x) / 2, left.y + ripple, right.x, right.y);
+    context.stroke();
+  }
+  context.restore();
+};
+
 const drawPine = (context, x, y, size) => {
   context.fillStyle = "rgba(45, 104, 114, 0.14)";
   context.beginPath();
@@ -309,13 +332,26 @@ export default async function setupMountain(game) {
   });
 
   game.events.addEventListener("rider:update", (event) => {
-    const riderAcross = Number(event.detail?.state?.position?.across) || 0;
-    const downhill = Number(event.detail?.state?.position?.downhill) || 0;
+    const riderState = event.detail?.state;
+    const camera = event.detail?.camera;
+    const riderAcross = Number(riderState?.position?.across) || 0;
+    const downhill = Number(riderState?.position?.downhill) || 0;
     if (course.phase === "idle") travel = 0;
     else if (course.phase === "running") travel = Math.max(0, downhill);
 
     context.save();
+    context.translate(game.canvas.width / 2, game.canvas.height / 2);
+    context.rotate(-(Number(camera?.roll) || 0));
+    context.translate(-game.canvas.width / 2, -game.canvas.height / 2);
     drawBackground(context, game.canvas, riderAcross);
+    drawSnowTexture(
+      context,
+      game.canvas,
+      riderAcross,
+      travel,
+      riderState?.surface ?? "powder",
+      Number(riderState?.speed) || 0,
+    );
     drawSideScenery(context, game.canvas, riderAcross, travel);
     drawHazards(context, game.canvas, riderAcross, course.hazards);
     context.restore();

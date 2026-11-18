@@ -5,6 +5,8 @@ const CONTROL_CODES = new Set([
   "ArrowUp",
   "KeyA",
   "KeyD",
+  "KeyS",
+  "KeyW",
   "Space",
 ]);
 
@@ -54,6 +56,9 @@ export function createKeyboardControls(target = window) {
       const carveLeft = pressed.has("KeyA");
       const carveRight = pressed.has("KeyD");
       const crouch = pressed.has("ArrowDown");
+      const nosePress = pressed.has("KeyW");
+      const tailPress = pressed.has("KeyS");
+      const stretch = pressed.has("ArrowUp");
       const jump = queuedJump;
 
       queuedJump = false;
@@ -62,7 +67,9 @@ export function createKeyboardControls(target = window) {
         carve: Number(carveRight) - Number(carveLeft),
         crouch: Number(crouch),
         jump: Number(jump),
+        press: Number(tailPress) - Number(nosePress),
         steer: Number(steerRight) - Number(steerLeft),
+        stretch: Number(stretch),
       });
     },
   });

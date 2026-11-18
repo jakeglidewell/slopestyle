@@ -3,8 +3,10 @@ import test from "node:test";
 
 import { buildLowPolyRider } from "../src/rider/model.js";
 import {
+  createSnowTrackTrail,
   drawCarveTrace,
   drawLowPolyRider,
+  drawSnowTracks,
   drawSnowSpray,
   getJumpLift,
 } from "../src/rider/renderer.js";
@@ -14,6 +16,7 @@ const palette = Object.freeze({
   boardShadow: "board-shadow",
   boots: "boots",
   carveTrace: "trace",
+  flatTrace: "flat-trace",
   helmet: "helmet",
   helmetShadow: "helmet-shadow",
   jacket: "jacket",
@@ -22,6 +25,7 @@ const palette = Object.freeze({
   pants: "pants",
   pantsShadow: "pants-shadow",
   snowSpray: "snow",
+  skidTrace: "skid-trace",
 });
 
 const createContext = () => {
@@ -98,4 +102,72 @@ test("a clean edge leaves a pencil-thin carve trace", () => {
   });
 
   assert.equal(calls.filter((call) => call === "stroke").length, 1);
+});
+
+test("the trail records a continuous carved path through world space", () => {
+  const trail = createSnowTrackTrail(20);
+
+  for (let step = 0; step < 6; step += 1) {
+    trail.update({
+      air: 0,
+      boardYaw: 0.25,
+      carveQuality: 0.9,
+      crashed: false,
+      edge: 0.7,
+      elapsed: step / 10,
+      position: { across: step * 0.12, downhill: step * 0.3 },
+      skid: 0.05,
+    });
+  }
+
+  assert.ok(trail.points().length >= 5 && trail.points().every((point) => point.kind === "carve"));
+});
+
+test("a flat board leaves a faint base ribbon", () => {
+  const trail = createSnowTrackTrail(20);
+
+  for (let step = 0; step < 4; step += 1) {
+    trail.update({
+      air: 0,
+      boardYaw: 0,
+      carveQuality: 0,
+      crashed: false,
+      edge: 0,
+      elapsed: step / 10,
+      position: { across: 0, downhill: step * 0.3 },
+      skid: 0,
+      surface: "groomed",
+    });
+  }
+
+  assert.ok(trail.points().length >= 3 && trail.points().every((point) => point.kind === "flat"));
+});
+
+test("skidded tracks render wider than clean carve tracks", () => {
+  const { calls, context } = createContext();
+  const widths = [];
+  Object.defineProperty(context, "lineWidth", {
+    set(value) {
+      widths.push(value);
+    },
+  });
+
+  drawSnowTracks(
+    context,
+    [
+      { across: 0, downhill: 0, kind: "carve", width: 1 },
+      { across: 0.1, downhill: 0.3, kind: "carve", width: 1 },
+      { across: 0.2, downhill: 0.6, kind: "skid", width: 6 },
+    ],
+    {
+      cameraAcross: 0,
+      currentDownhill: 1,
+      groundY: 100,
+      palette,
+      scale: 1,
+      viewportCenter: 100,
+    },
+  );
+
+  assert.ok(calls.includes("stroke") && Math.max(...widths) >= 6);
 });

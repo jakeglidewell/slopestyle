@@ -45,6 +45,19 @@ test("down controls the crouch input", () => {
   assert.equal(controls.read().crouch, 1);
 });
 
+test("W and S shift pressure toward the nose and tail", () => {
+  const target = new EventTarget();
+  const controls = createKeyboardControls(target);
+
+  target.dispatchEvent(keyEvent("keydown", "KeyW"));
+  const nose = controls.read();
+  target.dispatchEvent(keyEvent("keyup", "KeyW"));
+  target.dispatchEvent(keyEvent("keydown", "KeyS"));
+  const tail = controls.read();
+
+  assert.deepEqual([nose.press, tail.press], [-1, 1]);
+});
+
 test("space and up queue a jump input once per press", () => {
   const target = new EventTarget();
   const controls = createKeyboardControls(target);
@@ -58,6 +71,20 @@ test("space and up queue a jump input once per press", () => {
   target.dispatchEvent(keyEvent("keydown", "ArrowUp"));
 
   assert.equal(controls.read().jump, 1);
+});
+
+test("holding up stretches the rider after the initial jump", () => {
+  const target = new EventTarget();
+  const controls = createKeyboardControls(target);
+
+  target.dispatchEvent(keyEvent("keydown", "ArrowUp"));
+  const pressed = controls.read();
+  const held = controls.read();
+
+  assert.deepEqual(
+    [pressed.jump, pressed.stretch, held.jump, held.stretch],
+    [1, 1, 0, 1],
+  );
 });
 
 test("destroy detaches keyboard listeners", () => {

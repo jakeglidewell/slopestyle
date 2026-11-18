@@ -4,6 +4,7 @@ import { createKeyboardControls } from "./controls.js";
 import { createRiderState, stepRider } from "./physics.js";
 import { createRiderRenderer } from "./renderer.js";
 
+const PHYSICS_STEP = 1 / 120;
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
 
@@ -16,8 +17,10 @@ export default async function setupRider(game) {
   let environment = Object.freeze({ surface: "powder" });
   let stance = "regular";
   let camera = createCameraState();
-  let externalInput = Object.freeze({ carve: 0, crouch: 0, steer: 0 });
+  let externalInput = Object.freeze({ carve: 0, crouch: 0, press: 0, steer: 0, stretch: 0 });
   let queuedExternalJump = false;
+  let pendingJump = 0;
+  let physicsRemainder = 0;
   let previousTimestamp;
   let state = createRiderState({ surface: environment.surface });
 
@@ -26,7 +29,9 @@ export default async function setupRider(game) {
     externalInput = Object.freeze({
       carve: clamp(Number(event.detail?.carve) || 0, -1, 1),
       crouch: clamp(Number(event.detail?.crouch) || 0, 0, 1),
+      press: clamp(Number(event.detail?.press) || 0, -1, 1),
       steer: clamp(Number(event.detail?.steer) || 0, -1, 1),
+      stretch: clamp(Number(event.detail?.stretch) || 0, 0, 1),
     });
   });
 
@@ -48,6 +53,8 @@ export default async function setupRider(game) {
     camera = createCameraState();
     previousTimestamp = undefined;
     queuedExternalJump = false;
+    pendingJump = 0;
+    physicsRemainder = 0;
     state = createRiderState({
       speed: Number(event.detail?.speed) || 16,
       stance,
@@ -61,15 +68,32 @@ export default async function setupRider(game) {
       carve: clamp(keyboardInput.carve + externalInput.carve, -1, 1),
       crouch: Math.max(keyboardInput.crouch, externalInput.crouch),
       jump: Math.max(keyboardInput.jump, Number(queuedExternalJump)),
+      press: clamp(keyboardInput.press + externalInput.press, -1, 1),
       steer: clamp(keyboardInput.steer + externalInput.steer, -1, 1),
+      stretch: Math.max(keyboardInput.stretch, externalInput.stretch),
     });
     queuedExternalJump = false;
-    const deltaSeconds =
-      previousTimestamp === undefined ? 0 : (timestamp - previousTimestamp) / 1_000;
+    const deltaSeconds = previousTimestamp === undefined
+      ? 0
+      : clamp((timestamp - previousTimestamp) / 1_000, 0, 0.1);
 
     previousTimestamp = timestamp;
     const wasCrashed = state.crashed;
-    state = stepRider(state, input, deltaSeconds, environment);
+    pendingJump = Math.max(pendingJump, input.jump);
+    physicsRemainder += deltaSeconds;
+    let launched = 0;
+    while (physicsRemainder + 1e-9 >= PHYSICS_STEP) {
+      launched = Math.max(launched, pendingJump);
+      state = stepRider(
+        state,
+        { ...input, jump: pendingJump },
+        PHYSICS_STEP,
+        environment,
+      );
+      pendingJump = 0;
+      physicsRemainder -= PHYSICS_STEP;
+    }
+    const frameInput = Object.freeze({ ...input, jump: launched });
     if (!wasCrashed && state.crashed) {
       game.events.dispatchEvent(
         new CustomEvent("rider:crash", { detail: state }),
@@ -81,7 +105,7 @@ export default async function setupRider(game) {
       }
     }
     camera = stepCamera(camera, state, deltaSeconds);
-    const pose = getRiderPose(state, input);
+    const pose = getRiderPose(state, frameInput);
 
     renderer.beginFrame();
 
@@ -89,7 +113,7 @@ export default async function setupRider(game) {
       new CustomEvent("rider:update", {
         detail: Object.freeze({
           camera,
-          input,
+          input: frameInput,
           pose,
           state,
         }),

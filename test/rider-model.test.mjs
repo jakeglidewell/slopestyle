@@ -3,6 +3,13 @@ import test from "node:test";
 
 import { buildLowPolyRider } from "../src/rider/model.js";
 
+test("a tail press visibly raises the board nose", () => {
+  const normal = buildLowPolyRider({ press: 0 });
+  const tailPress = buildLowPolyRider({ press: 1 });
+
+  assert.ok(tailPress[0].points[0].y < normal[0].points[0].y);
+});
+
 const neutralPose = Object.freeze({
   boardRoll: 0,
   boardYaw: 0,
@@ -46,6 +53,33 @@ test("the snowboard points downhill instead of sideways", () => {
   const height = Math.max(...ys) - Math.min(...ys);
 
   assert.ok(height > width * 2);
+});
+
+test("the snowboard nose visibly lifts over a powder bump", () => {
+  const flat = getPart(buildLowPolyRider(neutralPose), "board");
+  const lifted = getPart(
+    buildLowPolyRider({ ...neutralPose, boardPitch: 0.4 }),
+    "board",
+  );
+
+  assert.ok(lifted.points[0].y > flat.points[0].y);
+});
+
+test("the legs absorb terrain while the head stays comparatively level", () => {
+  const neutral = buildLowPolyRider(neutralPose);
+  const bump = buildLowPolyRider({
+    ...neutralPose,
+    boardBob: 0.4,
+    bob: 0.08,
+  });
+  const boardTravel = Math.abs(
+    center(getPart(bump, "board")).y - center(getPart(neutral, "board")).y,
+  );
+  const headTravel = Math.abs(
+    center(getPart(bump, "head")).y - center(getPart(neutral, "head")).y,
+  );
+
+  assert.ok(boardTravel > headTravel * 2);
 });
 
 test("crouching lowers the rider head toward the board", () => {

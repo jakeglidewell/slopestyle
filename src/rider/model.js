@@ -60,27 +60,37 @@ export function buildLowPolyRider(pose = {}) {
   const foreAft = clamp(finiteOr(pose.foreAft), -1, 1);
   const jumpStretch = clamp(finiteOr(pose.jumpStretch), 0, 1);
   const lean = clamp(finiteOr(pose.lean), -1, 1);
+  const toeSide = pose.toeSide !== false;
   const twist = clamp(finiteOr(pose.upperBodyTwist), -1, 1);
   const boardAngle = clamp(finiteOr(pose.boardRoll), -Math.PI, Math.PI);
+  const boardPitch = clamp(finiteOr(pose.boardPitch), -0.6, 0.6);
   const butter = clamp(finiteOr(pose.butter), 0, 1);
+  const press = clamp(finiteOr(pose.press), -1, 1);
+  const noseLift = Math.max(0, press) * 18;
+  const tailLift = Math.max(0, -press) * 18;
   const handDrag = clamp(finiteOr(pose.handDrag), 0, 1);
+  const grab = clamp(finiteOr(pose.grab), 0, 1);
   const bob = finiteOr(pose.bob) * 20;
+  const boardBob = finiteOr(pose.boardBob, finiteOr(pose.bob)) * 20;
+  const kneeBob = bob * 0.42 + boardBob * 0.58;
   const boardShear = Math.sin(boardAngle) * 8;
   const stanceDirection =
     (pose.stance === "goofy" ? -1 : 1) * (pose.switchRiding ? -1 : 1);
   const hipCenter = point(
-    lean * 15,
-    -2 + crouch * 14 - jumpStretch * 5 - foreAft * 5 + butter * 4 + bob,
+    lean * (toeSide ? 16 : 11),
+    -2 + crouch * 14 - jumpStretch * 5 - foreAft * 5 +
+      butter * 4 + (toeSide ? 0 : Math.abs(lean) * 3) + bob,
   );
-  const leftAnkle = point(-2 + boardShear * 0.1, -23 + bob);
-  const rightAnkle = point(2 - boardShear * 0.1, 24 + bob);
-  const leftKnee = point(-9 + lean * 5, -9 + crouch * 7 + bob);
-  const rightKnee = point(9 + lean * 5, 10 + crouch * 5 + bob);
+  const leftAnkle = point(-2 + boardShear * 0.1, -23 - noseLift * 0.35 + boardBob);
+  const rightAnkle = point(2 - boardShear * 0.1, 24 - tailLift * 0.35 + boardBob);
+  const leftKnee = point(-9 + lean * 5, -9 + crouch * 7 + kneeBob);
+  const rightKnee = point(9 + lean * 5, 10 + crouch * 5 + kneeBob);
   const leftHip = point(hipCenter.x - 7, hipCenter.y - 2);
   const rightHip = point(hipCenter.x + 7, hipCenter.y + 2);
   const shoulderCenter = point(
-    hipCenter.x + lean * 12 + twist * 5,
-    hipCenter.y - 29 + crouch * 14 - jumpStretch * 8,
+    hipCenter.x + lean * (toeSide ? 14 : 8) + twist * 5,
+    hipCenter.y - 29 + crouch * 14 - jumpStretch * 8 +
+      (toeSide ? Math.abs(lean) * 2 : 0),
   );
   const leftShoulder = point(shoulderCenter.x - 15, shoulderCenter.y + 3);
   const rightShoulder = point(shoulderCenter.x + 15, shoulderCenter.y - 3);
@@ -91,8 +101,8 @@ export function buildLowPolyRider(pose = {}) {
     hipCenter.y + 12 + crouch * 9 - airborne * 3 + dragLeft * 22,
   );
   const rightHand = point(
-    hipCenter.x + 21 + twist * 8,
-    hipCenter.y + 12 + crouch * 9 - airborne * 3 + dragRight * 22,
+    hipCenter.x + 21 + twist * 8 - grab * 10,
+    hipCenter.y + 12 + crouch * 9 - airborne * 3 + dragRight * 22 + grab * 9,
   );
   const headCenter = point(
     shoulderCenter.x + lean * 8,
@@ -104,24 +114,24 @@ export function buildLowPolyRider(pose = {}) {
       "board",
       "board",
       [
-        point(boardShear, -60 + bob),
-        point(11 + boardShear * 0.72, -48 + bob),
-        point(13 - boardShear * 0.65, 44 + bob),
-        point(7 - boardShear, 58 + bob),
-        point(-7 - boardShear, 58 + bob),
-        point(-13 - boardShear * 0.65, 44 + bob),
-        point(-11 + boardShear * 0.72, -48 + bob),
+        point(boardShear, -60 + boardPitch * 10 - noseLift + boardBob),
+        point(11 + boardShear * 0.72, -48 + boardPitch * 6 - noseLift * 0.7 + boardBob),
+        point(13 - boardShear * 0.65, 44 + boardBob),
+        point(7 - boardShear, 58 - boardPitch * 3 - tailLift + boardBob),
+        point(-7 - boardShear, 58 - boardPitch * 3 - tailLift + boardBob),
+        point(-13 - boardShear * 0.65, 44 + boardBob),
+        point(-11 + boardShear * 0.72, -48 + boardPitch * 6 - noseLift * 0.7 + boardBob),
       ],
     ),
     polygon(
       "board-inset",
       "boardShadow",
       [
-        point(boardShear * 0.7, -46 + bob),
-        point(5 + boardShear * 0.4, -39 + bob),
-        point(6 - boardShear * 0.4, 43 + bob),
-        point(-6 - boardShear * 0.4, 43 + bob),
-        point(-5 + boardShear * 0.4, -39 + bob),
+        point(boardShear * 0.7, -46 + boardBob),
+        point(5 + boardShear * 0.4, -39 + boardBob),
+        point(6 - boardShear * 0.4, 43 + boardBob),
+        point(-6 - boardShear * 0.4, 43 + boardBob),
+        point(-5 + boardShear * 0.4, -39 + boardBob),
       ],
     ),
     polygon(

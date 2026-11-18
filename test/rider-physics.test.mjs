@@ -3,8 +3,81 @@ import test from "node:test";
 
 import {
   createRiderState,
+  sampleSnowTerrain,
   stepRider,
 } from "../src/rider/physics.js";
+
+test("snow terrain is deterministic and rougher in powder", () => {
+  const position = { across: 1.25, downhill: 42 };
+  const powder = sampleSnowTerrain(position, "powder");
+  const repeated = sampleSnowTerrain(position, "powder");
+  const ice = sampleSnowTerrain(position, "ice");
+
+  assert.deepEqual(powder, repeated);
+  assert.ok(powder.roughness > ice.roughness);
+});
+
+test("moving through powder produces physical bump contact", () => {
+  let state = createRiderState({ speed: 18, surface: "powder" });
+  let strongestBump = 0;
+
+  for (let frame = 0; frame < 180; frame += 1) {
+    state = stepRider(state, {}, 1 / 60, { surface: "powder" });
+    strongestBump = Math.max(strongestBump, state.bumpImpact);
+  }
+
+  assert.ok(strongestBump > 0.2 && Math.abs(state.terrainHeight) > 0.01);
+});
+
+test("a fast rider gets released by a powder crest unless crouched", () => {
+  const speed = 26;
+  const frameTravel = speed / 60;
+  let crest = 0;
+
+  for (let downhill = 0; downhill < 80; downhill += 0.02) {
+    const before = sampleSnowTerrain({ across: 0, downhill }, "powder");
+    const after = sampleSnowTerrain(
+      { across: 0, downhill: downhill + frameTravel },
+      "powder",
+    );
+    if (before.slope > 0.1 && after.slope < 0) {
+      crest = downhill;
+      break;
+    }
+  }
+
+  const terrain = sampleSnowTerrain({ across: 0, downhill: crest }, "powder");
+  const initial = createRiderState({
+    position: { across: 0, downhill: crest },
+    speed,
+    surface: "powder",
+    terrainHeight: terrain.height,
+    terrainPitch: terrain.slope,
+  });
+  const launched = stepRider(initial, {}, 1 / 60, { surface: "powder" });
+  const absorbed = stepRider(initial, { crouch: 1 }, 1 / 60, {
+    surface: "powder",
+  });
+
+  assert.ok(launched.air > 0 && absorbed.air === 0);
+});
+
+test("speed and rear-foot pressure float the nose in powder", () => {
+  const slow = stepRider(
+    createRiderState({ speed: 12, surface: "powder", frontFootPressure: 0.65 }),
+    {},
+    1 / 60,
+    { surface: "powder" },
+  );
+  const fast = stepRider(
+    createRiderState({ speed: 24, surface: "powder", frontFootPressure: 0.35 }),
+    {},
+    1 / 60,
+    { surface: "powder" },
+  );
+
+  assert.ok(fast.noseFloat > slow.noseFloat);
+});
 
 test("a neutral rider accelerates downhill", () => {
   const initial = createRiderState({ speed: 8 });
@@ -28,6 +101,41 @@ test("a held carve gets the board turning within half a second", () => {
   }
 
   assert.ok(state.boardYaw > 0.2);
+});
+
+test("a clean loaded edge develops carve quality and redirects momentum", () => {
+  let state = createRiderState({ speed: 18, surface: "groomed" });
+
+  for (let frame = 0; frame < 45; frame += 1) {
+    state = stepRider(state, { carve: 0.72, crouch: 0.35 }, 1 / 60, {
+      surface: "groomed",
+    });
+  }
+
+  assert.ok(state.carveQuality > 0.45 && Math.abs(state.velocity.across) > 2);
+});
+
+test("switch riding has the same carve authority as regular riding", () => {
+  let regular = createRiderState({ speed: 18, surface: "groomed" });
+  let switched = createRiderState({
+    boardYaw: Math.PI,
+    speed: 18,
+    surface: "groomed",
+    switchRiding: true,
+  });
+
+  for (let frame = 0; frame < 30; frame += 1) {
+    regular = stepRider(regular, { carve: 0.7 }, 1 / 60, {
+      surface: "groomed",
+    });
+    switched = stepRider(switched, { carve: 0.7 }, 1 / 60, {
+      surface: "groomed",
+    });
+  }
+
+  assert.ok(
+    Math.abs(switched.turnRate) >= Math.abs(regular.turnRate) * 0.95,
+  );
 });
 
 test("left and right carves turn in opposite directions with stance asymmetry", () => {
@@ -266,6 +374,23 @@ test("tucking increases a locked airborne spin rate", () => {
   assert.ok(Math.abs(tucked.boardYaw) > Math.abs(open.boardYaw));
 });
 
+test("air controls allow a small spin correction and an up-arrow stretch", () => {
+  let neutral = createRiderState({ air: 1, speed: 18, spinVelocity: 1.5 });
+  let corrected = neutral;
+  let stretched = neutral;
+
+  for (let frame = 0; frame < 30; frame += 1) {
+    neutral = stepRider(neutral, {}, 1 / 60);
+    corrected = stepRider(corrected, { carve: 1 }, 1 / 60);
+    stretched = stepRider(stretched, { stretch: 1 }, 1 / 60);
+  }
+
+  assert.ok(
+    corrected.spinVelocity > neutral.spinVelocity &&
+      Math.abs(stretched.boardYaw) < Math.abs(neutral.boardYaw),
+  );
+});
+
 test("loading the tail before takeoff creates a stronger pop", () => {
   let loaded = createRiderState();
 
@@ -344,6 +469,33 @@ test("steering pivots a flat board without creating edge lean", () => {
   assert.ok(state.boardYaw > 0.1 && Math.abs(state.edge) < 0.05);
 });
 
+test("a left board flick never creates rightward thrust", () => {
+  let left = createRiderState({ speed: 18, surface: "powder" });
+  let right = createRiderState({ speed: 18, surface: "powder" });
+
+  for (let frame = 0; frame < 60; frame += 1) {
+    left = stepRider(left, { steer: -1 }, 1 / 60, { surface: "powder" });
+    right = stepRider(right, { steer: 1 }, 1 / 60, { surface: "powder" });
+  }
+
+  assert.ok(left.velocity.across <= 0 && right.velocity.across >= 0);
+});
+
+test("holding A and left reinforces a leftward path", () => {
+  let state = createRiderState({ speed: 18, surface: "powder" });
+
+  for (let frame = 0; frame < 60; frame += 1) {
+    state = stepRider(
+      state,
+      { carve: -1, steer: -1 },
+      1 / 60,
+      { surface: "powder" },
+    );
+  }
+
+  assert.ok(state.position.across < -1 && state.velocity.across < 0);
+});
+
 test("matching steer and lean converts a skid into a gripped turn", () => {
   let skid = createRiderState({ speed: 18 });
   let carve = createRiderState({ speed: 18 });
@@ -371,6 +523,25 @@ test("a quick steering flick snaps the board back toward travel", () => {
   assert.ok(flickAngle > 0.3 && Math.abs(state.slipAngle) < 0.12);
 });
 
+test("a released flick cannot remain stuck sideways after a carve", () => {
+  let state = createRiderState({ speed: 18, surface: "powder" });
+
+  for (let frame = 0; frame < 24; frame += 1) {
+    state = stepRider(
+      state,
+      { carve: 1, steer: 1 },
+      1 / 60,
+      { surface: "powder" },
+    );
+  }
+
+  for (let frame = 0; frame < 45; frame += 1) {
+    state = stepRider(state, {}, 1 / 60, { surface: "powder" });
+  }
+
+  assert.ok(Math.abs(state.slipAngle) < 0.12);
+});
+
 test("a held park flick scrubs speed without killing the run", () => {
   let state = createRiderState({ speed: 18, surface: "powder" });
 
@@ -379,6 +550,41 @@ test("a held park flick scrubs speed without killing the run", () => {
   }
 
   assert.ok(state.speed > 14 && state.speed < 17.5);
+});
+
+test("a held skid costs more speed than a quick flick", () => {
+  let flick = createRiderState({ speed: 22, surface: "powder" });
+  let skid = createRiderState({ speed: 22, surface: "powder" });
+
+  for (let frame = 0; frame < 60; frame += 1) {
+    flick = stepRider(
+      flick,
+      { steer: frame < 6 ? 1 : 0 },
+      1 / 60,
+      { slopeGrade: 0.08, surface: "powder" },
+    );
+    skid = stepRider(skid, { steer: 1 }, 1 / 60, {
+      slopeGrade: 0.08,
+      surface: "powder",
+    });
+  }
+
+  assert.ok(flick.speed > skid.speed * 1.08);
+});
+
+test("a crooked but recoverable landing skids into line", () => {
+  const state = stepRider(
+    createRiderState({
+      air: 0.03,
+      boardYaw: 0.55,
+      velocity: { across: 0, downhill: 18 },
+      verticalVelocity: -3,
+    }),
+    {},
+    0.05,
+  );
+
+  assert.ok(!state.crashed && state.skid > 0.3);
 });
 
 test("air steering creates a shifty without changing locked momentum", () => {
