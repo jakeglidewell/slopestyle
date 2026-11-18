@@ -4,8 +4,9 @@
 import { COURSE } from "../mountain/index.js";
 
 const STORAGE_KEY = "slopestyle.bestDistance";
-const START_SPEED = 12;
-const MAX_SPEED = 32;
+const START_SPEED = 16;
+const MIN_COURSE_SPEED = 12;
+const MAX_SPEED = 34;
 const SPEED_PER_DODGE = 0.62;
 const REWARD_EVERY = 10;
 const REWARD_DROP = 3.2;
@@ -14,6 +15,16 @@ const HIT_WINDOW = 1.25;
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
+
+export const courseSpeedForRider = (riderState) => {
+  const downhillSpeed = Number.isFinite(riderState?.velocity?.downhill)
+    ? riderState.velocity.downhill
+    : Number(riderState?.speed) || 0;
+
+  return riderState?.crashed
+    ? Math.max(0, downhillSpeed)
+    : Math.max(MIN_COURSE_SPEED, downhillSpeed);
+};
 
 const randomBetween = (minimum, maximum) =>
   minimum + Math.random() * (maximum - minimum);
@@ -69,7 +80,10 @@ const addInterfaceStyles = () => {
 const createAudioController = () => {
   let context;
   let theme;
+  let ambience;
   let lastCarveAt = 0;
+  let lastSlash = 0;
+  let lastLandingImpact = 0;
 
   const ensure = () => {
     context ||= new (window.AudioContext || window.webkitAudioContext)();
@@ -95,11 +109,49 @@ const createAudioController = () => {
     oscillator.stop(audio.currentTime + duration);
   };
 
+  const startAmbience = () => {
+    if (ambience) return;
+    const audio = ensure();
+    const sampleCount = Math.floor(audio.sampleRate * 2);
+    const buffer = audio.createBuffer(1, sampleCount, audio.sampleRate);
+    const samples = buffer.getChannelData(0);
+    let seed = 19341;
+    for (let index = 0; index < sampleCount; index += 1) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+      samples[index] = (seed / 0x80000000) * 0.5;
+    }
+    const source = audio.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const makeLayer = (type, frequency) => {
+      const filter = audio.createBiquadFilter();
+      filter.type = type;
+      filter.frequency.value = frequency;
+      const gain = audio.createGain();
+      gain.gain.value = 0;
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(audio.destination);
+      return { filter, gain };
+    };
+    ambience = {
+      source,
+      snow: makeLayer("highpass", 1600),
+      skid: makeLayer("bandpass", 900),
+      wind: makeLayer("lowpass", 420),
+    };
+    source.start();
+  };
+
   return Object.freeze({
     startTheme() {
       const audio = ensure();
 
       if (theme) return;
+
+      startAmbience();
+      lastSlash = 0;
+      lastLandingImpact = 0;
 
       const gain = audio.createGain();
       const bass = audio.createOscillator();
@@ -129,13 +181,58 @@ const createAudioController = () => {
       }, 260);
     },
     stopTheme() {
-      if (!theme) return;
+      if (!theme && !ambience) return;
 
-      window.clearInterval(theme.timer);
-      theme.gain.gain.setTargetAtTime(0.0001, ensure().currentTime, 0.08);
-      theme.bass.stop(ensure().currentTime + 0.2);
-      theme.lead.stop(ensure().currentTime + 0.2);
-      theme = undefined;
+      const audio = ensure();
+      if (theme) {
+        window.clearInterval(theme.timer);
+        theme.gain.gain.setTargetAtTime(0.0001, audio.currentTime, 0.08);
+        theme.bass.stop(audio.currentTime + 0.2);
+        theme.lead.stop(audio.currentTime + 0.2);
+        theme = undefined;
+      }
+      if (ambience) {
+        for (const layer of [ambience.snow, ambience.skid, ambience.wind]) {
+          layer.gain.gain.setTargetAtTime(0.0001, audio.currentTime, 0.06);
+        }
+        ambience.source.stop(audio.currentTime + 0.2);
+        ambience = undefined;
+      }
+    },
+    ride(rider) {
+      if (!ambience) return;
+      const audio = ensure();
+      const speed = clamp(rider.speed / MAX_SPEED, 0, 1);
+      const onSnow = rider.air <= 0 && !rider.crashed ? 1 : 0;
+      const surfaceVolume = {
+        groomed: 0.034,
+        powder: 0.014,
+        ice: 0.048,
+        slush: 0.036,
+        chop: 0.042,
+        rail: 0.02,
+      }[rider.surface] ?? 0.03;
+      const snowPitch = rider.surface === "ice" ? 2500 :
+        rider.surface === "powder" ? 900 : 1600;
+      ambience.snow.filter.frequency.setTargetAtTime(snowPitch + speed * 700, audio.currentTime, 0.07);
+      ambience.snow.gain.gain.setTargetAtTime(
+        onSnow * surfaceVolume * (0.25 + speed * 0.75), audio.currentTime, 0.04,
+      );
+      ambience.skid.gain.gain.setTargetAtTime(
+        onSnow * (rider.skid * 0.046 + rider.slash * 0.016), audio.currentTime, 0.035,
+      );
+      ambience.wind.gain.gain.setTargetAtTime(
+        (0.005 + speed * speed * 0.045) * (1 - (rider.crouchAmount ?? 0) * 0.2),
+        audio.currentTime, 0.09,
+      );
+      if (rider.slash > 0.42 && lastSlash <= 0.42) {
+        tone(230, 0.065, "sawtooth", 0.016);
+      }
+      if (rider.landingImpact > 1.5 && lastLandingImpact <= 1.5) {
+        tone(85 + rider.landingImpact * 8, 0.1, "triangle", 0.028);
+      }
+      lastSlash = rider.slash;
+      lastLandingImpact = rider.landingImpact;
     },
     jump() {
       tone(420, 0.07, "triangle", 0.04);
@@ -276,7 +373,7 @@ export default async function setupGameLoop(game) {
         <h1>Slopestyle</h1>
         <p>Carve down the mountain, jump fallen logs, duck overhead hazards, and survive as long as you can.</p>
         <button class="primary-action" type="button" data-start>Start</button>
-        <p class="run-note">Steer with A/D or arrow keys. Jump with Space or Up. Duck with Down.</p>
+        <p class="run-note">A/D carve. Left/Right flick or hold to skid. Down crouches; Down plus an arrow butters. W/S press the nose/tail. Space or Up jumps.</p>
       </div>
     `;
     game.overlayRoot.querySelector("[data-start]").addEventListener("click", startRun, {
@@ -314,7 +411,9 @@ export default async function setupGameLoop(game) {
     lastFrameAt = undefined;
     lastJumpValue = 0;
     game.overlayRoot.innerHTML = "";
-    game.events.dispatchEvent(new Event("rider:reset"));
+    game.events.dispatchEvent(
+      new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
+    );
     dispatchCourse();
     audio.startTheme();
   };
@@ -323,7 +422,9 @@ export default async function setupGameLoop(game) {
     state = emptyRunState(state.best);
     lastFrameAt = undefined;
     lastJumpValue = 0;
-    game.events.dispatchEvent(new Event("rider:reset"));
+    game.events.dispatchEvent(
+      new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
+    );
     dispatchCourse();
     hud.update(state);
     showIdle();
@@ -381,6 +482,8 @@ export default async function setupGameLoop(game) {
 
   const updateRunning = (detail, delta) => {
     const { input, state: riderState } = detail;
+    const courseSpeed = courseSpeedForRider(riderState);
+    audio.ride(riderState);
 
     if (Math.abs(riderState.position.across) > COURSE.halfWidth) {
       endRun("cliff");
@@ -396,8 +499,9 @@ export default async function setupGameLoop(game) {
       audio.carve(Math.abs(riderState.edge));
     }
 
-    state.distance += state.speed * delta;
-    state.spawnLeft -= state.speed * delta;
+    state.speed = riderState.speed;
+    state.distance += courseSpeed * delta;
+    state.spawnLeft -= courseSpeed * delta;
     state.rewardTimer = Math.max(0, state.rewardTimer - delta);
 
     if (state.distance > state.best && !state.celebratedBest) {
@@ -414,7 +518,7 @@ export default async function setupGameLoop(game) {
     }
 
     for (const hazard of state.hazards) {
-      hazard.z -= state.speed * delta;
+      hazard.z -= courseSpeed * delta;
 
       if (hasCollision(hazard, riderState, input)) {
         endRun("hazard");
