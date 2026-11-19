@@ -19,6 +19,25 @@ const randomAt = (seed, chunk, slot, channel) =>
   hash(seed ^ Math.imul(chunk + 1, 0x9e3779b1) ^ Math.imul(slot + 1, 0x85ebca6b) ^ channel) /
   0x1_0000_0000;
 
+/** Smooth centerline in world space; near-camera motion cancels out in projection. */
+export function courseCenterAt(distance) {
+  return courseBendAt(distance);
+}
+
+export function courseWidthFactor(travel, ahead) {
+  const distance = Math.max(0, Number.isFinite(travel) ? travel : 0);
+  const z = Math.max(0, Number.isFinite(ahead) ? ahead : 0);
+  return 1 + 0.07 * (
+    Math.sin((distance + z) * 0.046 + 0.3) -
+    Math.sin(distance * 0.046 + 0.3)
+  );
+}
+
+export function courseReliefAt(distance) {
+  const along = Math.max(0, Number.isFinite(distance) ? distance : 0);
+  return Math.sin(along * 0.11) * 0.45 + Math.sin(along * 0.38) * 0.18;
+}
+
 const visibleChunkCache = new Map();
 
 const cachedSlopeChunk = (index, options) => {
@@ -48,13 +67,8 @@ export function biomeAt(distance) {
 /** The course bends ahead of the rider; its center remains at zero at the board. */
 export function courseBendAt(distance) {
   const safeDistance = Math.max(0, Number.isFinite(distance) ? distance : 0);
-  return 1.8 * Math.sin(safeDistance / 55) + 0.72 * Math.sin(safeDistance / 21 + 0.55);
-}
-
-/** Gentle downhill undulations shared with the 3D snow surface. */
-export function courseReliefAt(distance) {
-  const along = Math.max(0, Number.isFinite(distance) ? distance : 0);
-  return Math.sin(along * 0.11) * 0.45 + Math.sin(along * 0.38) * 0.18;
+  return Math.sin(safeDistance * 0.035 - 0.5) * 2.8 +
+    Math.sin(safeDistance * 0.082 + 0.7);
 }
 
 /** Stable world-space props for one course section. The white slope stays empty. */
@@ -75,8 +89,7 @@ export function createSlopeChunk(index, { halfWidth = 9.5, seed = 1 } = {}) {
     const section = CHUNK_LENGTH / count;
     const z = index * CHUNK_LENGTH +
       (slot + 0.3 + randomAt(seed, index, slot, 0) * 0.4) * section;
-    const cluster = Math.floor(slot / 3);
-    const clearance = 2.5 + cluster % 2 * 1.8 + randomAt(seed, index, slot, 1) * 5.2;
+    const clearance = 2.2 + randomAt(seed, index, slot, 1) * 17;
     const rockChance = { summit: 0.46, forest: 0.1, rocky: 0.68, glow: 0.22 }[biome];
 
     return Object.freeze({
@@ -125,16 +138,21 @@ export function projectCoursePoint(canvas, riderAcross, point, {
   const z = clamp(point.z, 0, viewDistance);
   const depth = 1 - z / viewDistance;
   const eased = depth * depth * (3 - 2 * depth);
-  const y = canvas.height * (HORIZON_Y + eased * (RIDER_Y - HORIZON_Y));
-  const widthChange = 1 + 0.09 * Math.sin((travel + z) / 34) * (z / viewDistance);
-  const pathHalf = slopeHalfAtY(canvas, y) * widthChange;
-  const bend = courseBendAt(travel + z) - courseBendAt(travel);
+  const baseY = canvas.height * (HORIZON_Y + eased * (RIDER_Y - HORIZON_Y));
+  const scale = 0.23 + eased * 0.77;
+  const near = clamp(z / 7, 0, 1);
+  const bendBlend = near * near * (3 - 2 * near);
+  const relief = (courseReliefAt(travel + z) - courseReliefAt(travel)) * bendBlend;
+  const y = baseY - relief * scale * canvas.height * 0.045;
+  const pathHalf = slopeHalfAtY(canvas, y) *
+    (1 + (courseWidthFactor(travel, z) - 1) * bendBlend);
+  const centerShift = (courseCenterAt(travel + z) - courseCenterAt(travel)) * bendBlend;
 
   return Object.freeze({
     alpha: clamp(eased * 1.6 + 0.2, 0, 1),
     pathHalf,
-    scale: 0.23 + eased * 0.77,
-    x: canvas.width / 2 + ((point.x - riderAcross + bend) / halfWidth) * pathHalf,
+    scale,
+    x: canvas.width / 2 + ((point.x - riderAcross + centerShift) / halfWidth) * pathHalf,
     y,
   });
 }

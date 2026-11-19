@@ -22,7 +22,8 @@ const game = Object.freeze({
 });
 
 const startGame = async () => {
-  for (const setupOwnerModule of [setupMountain, setupRider, setupGameLoop]) {
+  // Publish current hazards before the mountain paints each rider frame.
+  for (const setupOwnerModule of [setupGameLoop, setupMountain, setupRider]) {
     await setupOwnerModule(game);
   }
 

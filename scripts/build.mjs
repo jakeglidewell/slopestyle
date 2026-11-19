@@ -7,6 +7,7 @@ await build({
   entryPoints: ["src/main.js"],
   format: "iife",
   legalComments: "none",
+  minify: true,
   outfile: "game.bundle.js",
   platform: "browser",
   target: "es2020",
