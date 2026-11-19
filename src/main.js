@@ -19,8 +19,12 @@ const game = Object.freeze({
   overlayRoot: requireElement("#overlay-root"),
 });
 
-for (const setupOwnerModule of [setupMountain, setupRider, setupGameLoop]) {
-  await setupOwnerModule(game);
-}
+const startGame = async () => {
+  for (const setupOwnerModule of [setupMountain, setupRider, setupGameLoop]) {
+    await setupOwnerModule(game);
+  }
 
-game.events.dispatchEvent(new Event("ready"));
+  game.events.dispatchEvent(new Event("ready"));
+};
+
+void startGame();
