@@ -65,7 +65,7 @@ export function createSlopeChunk(index, { halfWidth = 9.5, seed = 1 } = {}) {
   const baseCount = { summit: 7, forest: 15, rocky: 10, glow: 9 }[biome];
   const count = baseCount + tier * 2;
   const scenery = Array.from({ length: count }, (_, slot) => {
-    const side = slot % 2 === 0 ? -1 : 1;
+    const side = randomAt(seed, index, slot, 4) < 0.5 ? -1 : 1;
     const section = CHUNK_LENGTH / count;
     const z = index * CHUNK_LENGTH +
       (slot + 0.3 + randomAt(seed, index, slot, 0) * 0.4) * section;
@@ -103,11 +103,19 @@ export function slopeHalfAtY(canvas, y) {
   return canvas.width * (0.058 + 0.285 * depth ** 1.16);
 }
 
+/** Match the near-ground piste projection to the chase camera's rider offset. */
+export function courseViewAcross(canvas, riderAcross, cameraAcross, zoom = 1, halfWidth = 9.5) {
+  const cameraLag = (riderAcross - cameraAcross) * 14 * clamp(zoom || 1, 0.82, 1);
+  const nearHalf = Math.max(1, slopeHalfAtY(canvas, canvas.height * 0.78));
+  return riderAcross - cameraLag * halfWidth / nearHalf;
+}
+
 /** Shared projection keeps scenery, hazards, and cliff edges in one perspective. */
 export function projectCoursePoint(canvas, riderAcross, point, {
   halfWidth = 9.5,
   travel = 0,
   viewDistance = 44,
+  travel = 0,
 } = {}) {
   const z = clamp(point.z, 0, viewDistance);
   const depth = 1 - z / viewDistance;

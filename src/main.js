@@ -14,6 +14,8 @@ const requireElement = (selector) => {
 
 const game = Object.freeze({
   canvas: requireElement("#game-canvas"),
+  worldCanvas: requireElement("#world-canvas"),
+  runtime: { world3d: null },
   events: new EventTarget(),
   hudRoot: requireElement("#hud-root"),
   overlayRoot: requireElement("#overlay-root"),

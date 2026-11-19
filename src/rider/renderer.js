@@ -327,13 +327,31 @@ export function createRiderRenderer(
       });
 
       context.save();
+      context.translate(riderX + 9 * viewportScale, groundY + 11 * viewportScale);
+      context.rotate((Number(pose.boardSwing) || 0) * 0.7);
+      context.scale(viewportScale * shadowScale, viewportScale * shadowScale);
+      context.fillStyle = "rgba(26, 65, 83, 0.13)";
+      context.beginPath();
+      context.moveTo(-8, -51);
+      context.lineTo(8, -51);
+      context.lineTo(12, -44);
+      context.lineTo(12, 43);
+      context.lineTo(8, 51);
+      context.lineTo(-8, 51);
+      context.lineTo(-12, 43);
+      context.lineTo(-12, -44);
+      context.closePath();
+      context.fill();
+      context.restore();
+
+      context.save();
       context.fillStyle = palette.shadow;
       context.beginPath();
       context.ellipse(
-        riderX,
-        groundY + 10 * viewportScale,
-        24 * viewportScale * shadowScale,
-        7 * viewportScale * shadowScale,
+        riderX + 9 * viewportScale,
+        groundY + 14 * viewportScale,
+        28 * viewportScale * shadowScale,
+        9 * viewportScale * shadowScale,
         0,
         0,
         Math.PI * 2,
@@ -342,9 +360,6 @@ export function createRiderRenderer(
       context.restore();
 
       drawLowPolyRider(context, buildLowPolyRider(pose), {
-        boardTweak:
-          (pose.boardBodyRotation ?? normalizeAngle(pose.boardYaw - pose.bodyYaw)) * 0.78 +
-          pose.boardTweak,
         palette,
         rotation:
           (pose.airborne > 0

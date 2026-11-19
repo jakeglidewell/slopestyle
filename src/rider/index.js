@@ -1,7 +1,7 @@
-import { getRiderPose } from "./animation.js";
+import { createRiderAnimator } from "./animation.js";
 import { createCameraState, stepCamera } from "./camera.js";
 import { createKeyboardControls } from "./controls.js";
-import { createRiderState, stepRider } from "./physics.js";
+import { crashRiderOnHazard, createRiderState, stepRider } from "./physics.js";
 import { createRiderRenderer } from "./renderer.js";
 
 const PHYSICS_STEP = 1 / 120;
@@ -26,7 +26,10 @@ export const setRiderSpeed = (state, targetSpeed) => {
  */
 export default async function setupRider(game) {
   const keyboard = createKeyboardControls(window);
-  const renderer = createRiderRenderer(game.canvas);
+  const renderer = game.runtime?.world3d
+    ? { beginFrame() {}, draw() {} }
+    : createRiderRenderer(game.canvas);
+  const animator = createRiderAnimator();
   let environment = Object.freeze({ surface: "powder" });
   let stance = "regular";
   let camera = createCameraState();
@@ -74,6 +77,7 @@ export default async function setupRider(game) {
   });
 
   game.events.addEventListener("rider:reset", (event) => {
+    animator.reset();
     camera = createCameraState();
     previousTimestamp = undefined;
     queuedExternalJump = false;
@@ -87,6 +91,12 @@ export default async function setupRider(game) {
       stance,
       surface: environment.surface,
     });
+  });
+
+  game.events.addEventListener("rider:impact", (event) => {
+    state = crashRiderOnHazard(state, event.detail);
+    pendingJump = 0;
+    queuedExternalJump = false;
   });
 
   const update = (timestamp) => {
@@ -142,9 +152,11 @@ export default async function setupRider(game) {
       }
     }
     camera = stepCamera(camera, state, deltaSeconds);
-    const pose = getRiderPose(state, frameInput);
+    let pose = animator.step(state, frameInput, deltaSeconds);
 
     renderer.beginFrame();
+
+    const stateBeforeEvents = state;
 
     game.events.dispatchEvent(
       new CustomEvent("rider:update", {
@@ -156,6 +168,10 @@ export default async function setupRider(game) {
         }),
       }),
     );
+
+    if (state !== stateBeforeEvents) {
+      pose = animator.step(state, frameInput, 0);
+    }
 
     renderer.draw({ camera, pose, state });
 

@@ -116,6 +116,14 @@ const drawMountainLayer = (context, canvas, peaks, base, color, shade, snow, dri
     context.lineTo(x - half * 0.11, top + shoulder * 1.05);
     context.closePath();
     context.fill();
+
+    context.fillStyle = "rgba(121, 177, 197, 0.2)";
+    context.beginPath();
+    context.moveTo(x - half * 0.23, top + (bottom - top) * 0.23);
+    context.lineTo(x, top);
+    context.lineTo(x - half * 0.04, top + (bottom - top) * 0.23);
+    context.closePath();
+    context.fill();
   }
 };
 
@@ -210,7 +218,7 @@ const drawSnowTexture = (context, canvas, riderAcross, travel, surface, speed) =
     context.lineWidth = Math.max(0.7, left.scale * (surface === "powder" ? 2.5 : 1.4));
     context.beginPath();
     context.moveTo(left.x, left.y);
-    context.quadraticCurveTo((left.x + right.x) / 2, left.y + ripple, right.x, right.y);
+    context.quadraticCurveTo((left.x + right.x) / 2, left.y - 4 * left.scale, right.x, right.y);
     context.stroke();
   }
   context.restore();
@@ -396,6 +404,14 @@ const drawPine = (context, x, y, size, danger = false) => {
     context.beginPath();
     context.moveTo(x, peak);
     context.lineTo(x - half, base);
+    context.lineTo(x + size * 0.04, base);
+    context.closePath();
+    context.fill();
+
+    context.fillStyle = layer === 1 ? "#269976" : "#1a856a";
+    context.beginPath();
+    context.moveTo(x, peak);
+    context.lineTo(x + size * 0.04, base);
     context.lineTo(x + half, base);
     context.closePath();
     context.fill();
@@ -551,6 +567,58 @@ const drawSideScenery = (context, canvas, riderAcross, travel) => {
   }
 };
 
+const drawPisteMarkers = (context, canvas, riderAcross, travel) => {
+  const first = Math.floor(travel / 10) * 10;
+  for (let world = first; world < travel + COURSE.spawnDistance; world += 10) {
+    const z = world - travel;
+    if (z < 1 || z > COURSE.spawnDistance - 1) continue;
+    for (const side of [-1, 1]) {
+      const projected = projectCoursePoint(
+        canvas, riderAcross, { x: side * (COURSE.halfWidth + 0.55), z },
+        { halfWidth: COURSE.halfWidth, viewDistance: COURSE.spawnDistance, travel },
+      );
+      const unit = screenUnit(canvas) * projected.scale;
+      const poleHeight = 38 * unit;
+      const { x, y } = projected;
+      context.save();
+      context.globalAlpha = projected.alpha;
+      context.strokeStyle = "rgba(55, 103, 123, 0.22)";
+      context.lineWidth = Math.max(1, 2 * unit);
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x + side * 16 * unit, y + 3 * unit);
+      context.stroke();
+      context.strokeStyle = "#e15f50";
+      context.lineWidth = Math.max(1.5, 3 * unit);
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x, y - poleHeight);
+      context.stroke();
+      context.strokeStyle = "#f58e71";
+      context.lineWidth = Math.max(0.8, unit);
+      context.beginPath();
+      context.moveTo(x - unit * 0.75, y - 2 * unit);
+      context.lineTo(x - unit * 0.75, y - poleHeight);
+      context.stroke();
+      context.fillStyle = "#c6b9aa";
+      context.beginPath();
+      context.moveTo(x + 2 * unit, y - poleHeight + unit);
+      context.lineTo(x - side * 13 * unit + 2 * unit, y - poleHeight + 6 * unit);
+      context.lineTo(x + 2 * unit, y - poleHeight + 11 * unit);
+      context.closePath();
+      context.fill();
+      context.fillStyle = "#f4e9d8";
+      context.beginPath();
+      context.moveTo(x, y - poleHeight);
+      context.lineTo(x - side * 15 * unit, y - poleHeight + 5 * unit);
+      context.lineTo(x, y - poleHeight + 10 * unit);
+      context.closePath();
+      context.fill();
+      context.restore();
+    }
+  }
+};
+
 const drawJumpHazard = (context, canvas, projected) => {
   const width = projected.pathHalf * 2.08;
   const height = Math.max(7, projected.pathHalf / COURSE.halfWidth * 0.72);
@@ -646,13 +714,26 @@ const drawBranch = (context, canvas, projected) => {
   context.lineWidth = Math.max(5, 15 * scale);
   context.beginPath();
   context.moveTo(x - half, y - 9 * scale);
-  context.quadraticCurveTo(x, y + 11 * scale, x + half, y - 9 * scale);
+  context.quadraticCurveTo(x, y + 9 * scale, x + half, y - 9 * scale);
   context.stroke();
 
   context.fillStyle = "#1b624f";
   for (const offset of [-0.72, -0.36, 0.08, 0.47, 0.77]) {
+    const leafX = x + half * offset;
+    const leafY = y - 10 * scale;
+    context.fillStyle = "#0b584e";
     context.beginPath();
-    context.ellipse(x + half * offset, y - 10 * scale, 16 * scale, 8 * scale, offset * 0.25, 0, Math.PI * 2);
+    context.moveTo(leafX - 16 * scale, leafY + 5 * scale);
+    context.lineTo(leafX + 2 * scale, leafY - 12 * scale);
+    context.lineTo(leafX + 16 * scale, leafY + 5 * scale);
+    context.closePath();
+    context.fill();
+    context.fillStyle = "#249575";
+    context.beginPath();
+    context.moveTo(leafX + 2 * scale, leafY - 12 * scale);
+    context.lineTo(leafX + 16 * scale, leafY + 5 * scale);
+    context.lineTo(leafX + 2 * scale, leafY + 5 * scale);
+    context.closePath();
     context.fill();
   }
 };
@@ -708,6 +789,25 @@ const drawHazards = (context, canvas, riderAcross, travel, hazards) => {
 
 /** Mountain owner: render the course before the rider is drawn each frame. */
 export default async function setupMountain(game) {
+  if (game.worldCanvas && game.runtime) {
+    try {
+      const { createMountainWorld } = await import("./world3d.js");
+      const world = createMountainWorld(game.worldCanvas);
+      game.runtime.world3d = world;
+      game.canvas.style.visibility = "hidden";
+      game.events.addEventListener("course:update", (event) => {
+        world.setCourse(event.detail);
+      });
+      game.events.addEventListener("rider:update", (event) => {
+        world.render(event.detail);
+      });
+      return;
+    } catch (error) {
+      console.warn("3D mountain renderer unavailable; using the canvas view", error);
+      game.worldCanvas.style.display = "none";
+    }
+  }
+
   const context = game.canvas.getContext("2d");
   if (!context) throw new Error("Mountain rendering requires a 2D canvas context");
 

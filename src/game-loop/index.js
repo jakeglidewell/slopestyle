@@ -7,10 +7,6 @@ const STORAGE_KEY = "slopestyle.bestDistance";
 const START_SPEED = 16;
 const MIN_COURSE_SPEED = 12;
 const MAX_SPEED = 34;
-const SPEED_PER_DODGE = 0.62;
-const REWARD_EVERY = 10;
-const REWARD_DROP = 3.2;
-const REWARD_DURATION = 2.4;
 const HIT_WINDOW = 1.25;
 
 const clamp = (value, minimum, maximum) =>
@@ -24,6 +20,28 @@ export const courseSpeedForRider = (riderState) => {
   return riderState?.crashed
     ? Math.max(0, downhillSpeed)
     : Math.max(MIN_COURSE_SPEED, downhillSpeed);
+};
+
+export const syncHazardsToRider = (hazards, riderDownhill) =>
+  hazards.map((hazard) => ({
+    ...hazard,
+    z: hazard.worldDownhill - riderDownhill,
+  }));
+
+export const hazardHitsRider = (hazard, riderState, input = {}) => {
+  if (hazard.passed || Math.abs(hazard.z) > HIT_WINDOW) return false;
+  const lateralGap = Math.abs(hazard.x - riderState.position.across);
+  const air = Number(riderState.air) || 0;
+
+  if (hazard.kind === "jump") {
+    return lateralGap < (hazard.radius ?? COURSE.halfWidth * 0.94) && air < 0.5;
+  }
+  if (hazard.kind === "duck") {
+    const halfSpan = hazard.variant === "bird" ? 0.86 : 0.88;
+    return lateralGap < (hazard.radius ?? COURSE.halfWidth * halfSpan) &&
+      (Number(input.crouch) || 0) < 0.75;
+  }
+  return air < 0.35 && lateralGap < 1.05;
 };
 
 const randomBetween = (minimum, maximum) =>
@@ -91,9 +109,8 @@ const addInterfaceStyles = () => {
 
 const createAudioController = () => {
   let context;
-  let theme;
   let ambience;
-  let lastCarveAt = 0;
+  let noiseBuffer;
   let lastSlash = 0;
   let lastLandingImpact = 0;
 
@@ -106,34 +123,42 @@ const createAudioController = () => {
     return context;
   };
 
-  const tone = (frequency, duration, type = "sine", volume = 0.05) => {
-    const audio = ensure();
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-
-    oscillator.type = type;
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(volume, audio.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
-    oscillator.connect(gain);
-    gain.connect(audio.destination);
-    oscillator.start();
-    oscillator.stop(audio.currentTime + duration);
-  };
-
-  const startAmbience = () => {
-    if (ambience) return;
-    const audio = ensure();
+  const makeNoiseBuffer = (audio) => {
+    if (noiseBuffer) return noiseBuffer;
     const sampleCount = Math.floor(audio.sampleRate * 2);
-    const buffer = audio.createBuffer(1, sampleCount, audio.sampleRate);
-    const samples = buffer.getChannelData(0);
+    noiseBuffer = audio.createBuffer(1, sampleCount, audio.sampleRate);
+    const samples = noiseBuffer.getChannelData(0);
     let seed = 19341;
     for (let index = 0; index < sampleCount; index += 1) {
       seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
       samples[index] = (seed / 0x80000000) * 0.5;
     }
+    return noiseBuffer;
+  };
+
+  const snowBurst = (duration, frequency, volume) => {
+    const audio = ensure();
     const source = audio.createBufferSource();
-    source.buffer = buffer;
+    const filter = audio.createBiquadFilter();
+    const gain = audio.createGain();
+    source.buffer = makeNoiseBuffer(audio);
+    filter.type = "bandpass";
+    filter.frequency.value = frequency;
+    filter.Q.value = 0.5;
+    gain.gain.setValueAtTime(0.001, audio.currentTime);
+    gain.gain.linearRampToValueAtTime(volume, audio.currentTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audio.destination);
+    source.start(audio.currentTime, 0, duration);
+  };
+
+  const startAmbience = () => {
+    if (ambience) return;
+    const audio = ensure();
+    const source = audio.createBufferSource();
+    source.buffer = makeNoiseBuffer(audio);
     source.loop = true;
     const makeLayer = (type, frequency) => {
       const filter = audio.createBiquadFilter();
@@ -156,53 +181,15 @@ const createAudioController = () => {
   };
 
   return Object.freeze({
-    startTheme() {
-      const audio = ensure();
-
-      if (theme) return;
-
+    startRide() {
       startAmbience();
       lastSlash = 0;
       lastLandingImpact = 0;
-
-      const gain = audio.createGain();
-      const bass = audio.createOscillator();
-      const lead = audio.createOscillator();
-
-      bass.type = "triangle";
-      lead.type = "sine";
-      bass.frequency.value = 110;
-      lead.frequency.value = 220;
-      gain.gain.value = 0.025;
-      bass.connect(gain);
-      lead.connect(gain);
-      gain.connect(audio.destination);
-      bass.start();
-      lead.start();
-      theme = { bass, gain, lead };
-
-      let beat = 0;
-      theme.timer = window.setInterval(() => {
-        if (!theme) return;
-
-        const notes = [220, 277, 330, 277, 392, 330, 277, 247];
-        const now = audio.currentTime;
-        theme.lead.frequency.setTargetAtTime(notes[beat % notes.length], now, 0.02);
-        theme.bass.frequency.setTargetAtTime(beat % 4 === 0 ? 110 : 146.8, now, 0.03);
-        beat += 1;
-      }, 260);
     },
-    stopTheme() {
-      if (!theme && !ambience) return;
+    stopRide() {
+      if (!ambience) return;
 
       const audio = ensure();
-      if (theme) {
-        window.clearInterval(theme.timer);
-        theme.gain.gain.setTargetAtTime(0.0001, audio.currentTime, 0.08);
-        theme.bass.stop(audio.currentTime + 0.2);
-        theme.lead.stop(audio.currentTime + 0.2);
-        theme = undefined;
-      }
       if (ambience) {
         for (const layer of [ambience.snow, ambience.skid, ambience.wind]) {
           layer.gain.gain.setTargetAtTime(0.0001, audio.currentTime, 0.06);
@@ -238,38 +225,25 @@ const createAudioController = () => {
         audio.currentTime, 0.09,
       );
       if (rider.slash > 0.42 && lastSlash <= 0.42) {
-        tone(230, 0.065, "sawtooth", 0.016);
+        snowBurst(0.14, 750, 0.02);
       }
       if (rider.landingImpact > 1.5 && lastLandingImpact <= 1.5) {
-        tone(85 + rider.landingImpact * 8, 0.1, "triangle", 0.028);
+        snowBurst(0.2, 280, 0.04);
       }
       lastSlash = rider.slash;
       lastLandingImpact = rider.landingImpact;
     },
     jump() {
-      tone(420, 0.07, "triangle", 0.04);
-    },
-    carve(force) {
-      const now = performance.now();
-
-      if (now - lastCarveAt < 380) return;
-      lastCarveAt = now;
-      tone(90 + force * 70, 0.11, "sawtooth", 0.022);
+      snowBurst(0.09, 1200, 0.015);
     },
     clear(kind) {
       tone(kind === "jump" ? 590 : 470, 0.085, "triangle", 0.026);
     },
     crash() {
-      tone(82, 0.24, "sawtooth", 0.07);
+      snowBurst(0.32, 220, 0.09);
     },
-    highScore() {
-      tone(660, 0.08, "sine", 0.045);
-      window.setTimeout(() => tone(990, 0.12, "sine", 0.04), 90);
-    },
-    noooo() {
-      tone(196, 0.7, "sawtooth", 0.055);
-      window.setTimeout(() => tone(146.8, 0.55, "sawtooth", 0.035), 420);
-      window.setTimeout(() => tone(98, 0.5, "sawtooth", 0.02), 800);
+    fall() {
+      snowBurst(0.3, 330, 0.035);
     },
   });
 };
@@ -281,8 +255,8 @@ const createHud = (root) => {
       <strong class="hud-value" data-distance>0 m</strong>
     </div>
     <div class="hud-card" aria-live="polite">
-      <span class="hud-label">Best</span>
-      <strong class="hud-value" data-best>0 m</strong>
+      <span class="hud-label">Speed</span>
+      <strong class="hud-value" data-speed>0<span class="hud-unit">km/h</span></strong>
     </div>
     <div class="run-feedback" data-feedback aria-live="polite"></div>
   `;
@@ -299,9 +273,10 @@ const createHud = (root) => {
   });
 };
 
-const spawnHazard = (state) => {
+const spawnHazard = (state, riderDownhill) => {
   const actionRoll = Math.random();
   let kind = "steer";
+  const worldDownhill = riderDownhill + COURSE.spawnDistance;
 
   if (state.dodged > 4 && actionRoll > 0.82) {
     kind = "duck";
@@ -315,6 +290,8 @@ const spawnHazard = (state) => {
       kind,
       passed: false,
       variant: "fallen-log",
+      radius: 7.2,
+      worldDownhill,
       x: 0,
       z: COURSE.spawnDistance,
     };
@@ -325,7 +302,9 @@ const spawnHazard = (state) => {
       id: state.nextHazardId,
       kind,
       passed: false,
-      variant: Math.random() > 0.45 ? "bird" : "branch",
+      variant: "branch",
+      radius: 3.9,
+      worldDownhill,
       x: 0,
       z: COURSE.spawnDistance,
     };
@@ -367,8 +346,7 @@ const emptyRunState = (best) => ({
   lastLane: -1,
   nextHazardId: 1,
   phase: "idle",
-  rewardTimer: 0,
-  spawnLeft: 10,
+  spawnLeft: 12,
   speed: START_SPEED,
 });
 
@@ -396,7 +374,6 @@ export default async function setupGameLoop(game) {
           distance: state.distance,
           hazards: Object.freeze(state.hazards.map((hazard) => Object.freeze({ ...hazard }))),
           phase: state.phase,
-          rewardTimer: state.rewardTimer,
         }),
       }),
     );
@@ -426,7 +403,7 @@ export default async function setupGameLoop(game) {
         <button class="primary-action" type="button" data-return>Return to top</button>
       </div>
     `;
-    game.overlayRoot.querySelector("[data-return]").addEventListener("click", returnToTop, {
+    game.overlayRoot.querySelector("[data-restart]").addEventListener("click", startRun, {
       once: true,
     });
   };
@@ -434,7 +411,7 @@ export default async function setupGameLoop(game) {
   const showFall = () => {
     game.overlayRoot.innerHTML = `
       <div class="overlay-panel fall-callout">
-        <h1>NOOOOOOO</h1>
+        <h1>Off the mountain</h1>
       </div>
     `;
   };
@@ -469,7 +446,7 @@ export default async function setupGameLoop(game) {
     showIdle();
   };
 
-  const endRun = (reason) => {
+  const endRun = (reason, hazard) => {
     state.finalDistance = state.distance;
     state.crashFx = 0.8;
     state.best = Math.max(state.best, Math.floor(state.distance));
@@ -480,12 +457,15 @@ export default async function setupGameLoop(game) {
     if (reason === "cliff") {
       state.phase = "falling";
       state.fallTimer = 1.35;
-      audio.noooo();
+      audio.fall();
       showFall();
       return;
     }
 
     state.phase = "crashed";
+    if (reason === "hazard") {
+      game.events.dispatchEvent(new CustomEvent("rider:impact", { detail: hazard }));
+    }
     audio.crash();
     showCrash();
   };
@@ -537,9 +517,15 @@ export default async function setupGameLoop(game) {
   const updateRunning = (detail, delta) => {
     const { input, state: riderState } = detail;
     const courseSpeed = courseSpeedForRider(riderState);
+    const riderDownhill = Number.isFinite(riderState.position.downhill)
+      ? riderState.position.downhill
+      : state.lastRiderDownhill;
+    const downhillProgress = Math.max(0, riderDownhill - state.lastRiderDownhill);
+    state.lastRiderDownhill = riderDownhill;
     audio.ride(riderState);
 
-    if (Math.abs(riderState.position.across) > COURSE.halfWidth) {
+    if (Math.abs(riderState.position.across) >
+        (game.runtime?.world3d ? 38 : COURSE.halfWidth)) {
       endRun("cliff");
       return;
     }
@@ -549,21 +535,9 @@ export default async function setupGameLoop(game) {
     }
     lastJumpValue = input.jump;
 
-    if (Math.abs(input.carve) > 0.85 && Math.abs(riderState.edge) > 0.48) {
-      audio.carve(Math.abs(riderState.edge));
-    }
-
     state.speed = riderState.speed;
     state.distance += courseSpeed * delta;
-    state.spawnLeft -= courseSpeed * delta;
-    state.rewardTimer = Math.max(0, state.rewardTimer - delta);
-
-    if (state.distance > state.best && !state.celebratedBest) {
-      state.best = Math.floor(state.distance);
-      state.celebratedBest = true;
-      setStoredBest(state.best);
-      audio.highScore();
-    }
+    state.spawnLeft -= downhillProgress;
 
     if (state.spawnLeft <= 0) {
       const hazard = spawnHazard(state);
@@ -572,11 +546,10 @@ export default async function setupGameLoop(game) {
       state.spawnLeft = nextSpawnDistance(state.speed, hazard.kind);
     }
 
+    state.hazards = syncHazardsToRider(state.hazards, riderDownhill);
     for (const hazard of state.hazards) {
-      hazard.z -= courseSpeed * delta;
-
-      if (hasCollision(hazard, riderState, input)) {
-        endRun("hazard");
+      if (hazardHitsRider(hazard, riderState, input)) {
+        endRun("hazard", hazard);
         return;
       }
 
@@ -612,6 +585,12 @@ export default async function setupGameLoop(game) {
       updateRunning(event.detail, delta);
     } else if (state.phase === "falling") {
       updateFalling(delta);
+    }
+
+    if (state.phase !== "running") {
+      state.hazards = syncHazardsToRider(
+        state.hazards, Number(event.detail?.state?.position?.downhill) || 0,
+      );
     }
 
     hud.update(state);

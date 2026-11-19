@@ -3,12 +3,14 @@ import test from "node:test";
 
 import {
   CHUNK_LENGTH,
+  courseViewAcross,
   createSlopeChunk,
   projectCoursePoint,
   sceneryTier,
   slopeHalfAtY,
   visibleSlopeChunks,
 } from "../src/mountain/course.js";
+import setupMountain from "../src/mountain/index.js";
 
 test("course chunks repeat for a seed and change with a different seed", () => {
   const first = createSlopeChunk(8, { seed: 52 });
