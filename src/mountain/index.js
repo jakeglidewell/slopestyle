@@ -763,6 +763,43 @@ const drawActionCue = (context, projected, kind) => {
   context.stroke();
 };
 
+const drawRollingBoulder = (context, projected, hazard) => {
+  const { x, y, pathHalf } = projected;
+  const radius = pathHalf / COURSE.halfWidth * hazard.radius;
+  context.fillStyle = "rgba(21,48,61,0.26)";
+  context.beginPath();
+  context.ellipse(x, y, radius, radius * 0.25, 0, 0, Math.PI * 2);
+  context.fill();
+
+  context.translate(x, y - radius * 0.92);
+  context.rotate(hazard.roll);
+  context.fillStyle = "#374859";
+  context.beginPath();
+  context.moveTo(-radius, 0);
+  context.lineTo(-radius * 0.72, -radius * 0.7);
+  context.lineTo(0, -radius);
+  context.lineTo(radius * 0.76, -radius * 0.58);
+  context.lineTo(radius, radius * 0.18);
+  context.lineTo(radius * 0.52, radius * 0.84);
+  context.lineTo(-radius * 0.28, radius * 0.94);
+  context.lineTo(-radius * 0.81, radius * 0.57);
+  context.closePath();
+  context.fill();
+  context.strokeStyle = "#273746";
+  context.lineWidth = Math.max(1.5, radius * 0.06);
+  context.stroke();
+
+  context.fillStyle = "#c3dbe1";
+  context.beginPath();
+  context.moveTo(-radius * 0.72, -radius * 0.7);
+  context.lineTo(0, -radius);
+  context.lineTo(radius * 0.49, -radius * 0.73);
+  context.lineTo(radius * 0.16, -radius * 0.54);
+  context.lineTo(-radius * 0.43, -radius * 0.44);
+  context.closePath();
+  context.fill();
+};
+
 const drawHazards = (context, canvas, riderAcross, travel, hazards) => {
   for (const hazard of [...hazards].sort((a, b) => b.z - a.z)) {
     if (hazard.z < -2 || hazard.z > COURSE.spawnDistance) continue;
@@ -778,6 +815,8 @@ const drawHazards = (context, canvas, riderAcross, travel, hazards) => {
       if (hazard.variant === "bird") drawBird(context, canvas, projected);
       else drawBranch(context, canvas, projected);
       if (hazard.z > 3) drawActionCue(context, projected, "duck");
+    } else if (hazard.variant === "rolling-boulder") {
+      drawRollingBoulder(context, projected, hazard);
     } else {
       const size = projected.pathHalf / COURSE.halfWidth * 2.35;
       if (hazard.variant === "rock") drawRock(context, projected.x, projected.y, size, true);

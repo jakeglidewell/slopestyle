@@ -178,6 +178,15 @@ const makeRock = (size = 1) => {
   return rock;
 };
 
+const makeRollingBoulder = (radius) => {
+  const boulder = new THREE.Group();
+  solid(new THREE.DodecahedronGeometry(radius, 0), rockMaterial, boulder);
+  const snow = solid(new THREE.DodecahedronGeometry(radius * 0.43, 0),
+    snowMaterial, boulder, -radius * 0.13, radius * 0.74, radius * 0.12);
+  snow.scale.y = 0.65;
+  return boulder;
+};
+
 const makeFallenLog = () => {
   const feature = new THREE.Group();
   const trunk = solid(new THREE.CylinderGeometry(0.29, 0.39, 14.5, 10),
@@ -212,6 +221,7 @@ const makeLowBranch = () => {
 const makeHazard = (hazard) => {
   if (hazard.kind === "jump") return makeFallenLog();
   if (hazard.kind === "duck") return makeLowBranch();
+  if (hazard.variant === "rolling-boulder") return makeRollingBoulder(hazard.radius);
   return hazard.variant === "rock" ? makeRock(1.15) : makePine(1.25);
 };
 
@@ -399,16 +409,24 @@ export function createMountainWorld(canvas) {
   const updateHazards = () => {
     const active = new Set(course.hazards.map((hazard) => hazard.id));
     for (const hazard of course.hazards) {
-      if (hazardMeshes.has(hazard.id)) continue;
-      const mesh = makeHazard(hazard);
-      mesh.position.set(hazard.x, snowSurfaceHeight(hazard.x, hazard.worldDownhill),
-        -hazard.worldDownhill);
-      scene.add(mesh);
-      hazardMeshes.set(hazard.id, mesh);
+      const rolling = hazard.variant === "rolling-boulder";
+      let mesh = hazardMeshes.get(hazard.id);
+      if (!mesh) {
+        mesh = makeHazard(hazard);
+        scene.add(mesh);
+        hazardMeshes.set(hazard.id, mesh);
+      } else if (!rolling) {
+        continue;
+      }
+      const lift = rolling ? hazard.radius * 0.93 : 0;
+      const ground = snowSurfaceHeight(hazard.x, hazard.worldDownhill);
+      mesh.position.set(hazard.x, ground + lift, -hazard.worldDownhill);
+      if (rolling) mesh.rotation.z = -hazard.roll;
     }
     for (const [id, mesh] of hazardMeshes) {
       if (active.has(id)) continue;
       scene.remove(mesh);
+      mesh.traverse((object) => object.geometry?.dispose());
       hazardMeshes.delete(id);
     }
   };
