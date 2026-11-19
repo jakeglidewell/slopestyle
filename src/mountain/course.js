@@ -51,6 +51,12 @@ export function courseBendAt(distance) {
   return 1.8 * Math.sin(safeDistance / 55) + 0.72 * Math.sin(safeDistance / 21 + 0.55);
 }
 
+/** Gentle downhill undulations shared with the 3D snow surface. */
+export function courseReliefAt(distance) {
+  const along = Math.max(0, Number.isFinite(distance) ? distance : 0);
+  return Math.sin(along * 0.11) * 0.45 + Math.sin(along * 0.38) * 0.18;
+}
+
 /** Stable world-space props for one course section. The white slope stays empty. */
 export function createSlopeChunk(index, { halfWidth = 9.5, seed = 1 } = {}) {
   if (!Number.isInteger(index) || index < 0) {
@@ -115,7 +121,6 @@ export function projectCoursePoint(canvas, riderAcross, point, {
   halfWidth = 9.5,
   travel = 0,
   viewDistance = 44,
-  travel = 0,
 } = {}) {
   const z = clamp(point.z, 0, viewDistance);
   const depth = 1 - z / viewDistance;

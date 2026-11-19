@@ -243,20 +243,24 @@ export function buildLowPolyRider(pose = {}) {
         boardPoint(-5, -41),
       ],
     ),
-    polygon("board-stripe", "boardAccent", [
-      point(boardShear * 0.65, -41 + boardBob),
-      point(3 + boardShear * 0.35, -35 + boardBob),
-      point(3 - boardShear * 0.2, 40 + boardBob),
-      point(-3 - boardShear * 0.2, 40 + boardBob),
-      point(-3 + boardShear * 0.35, -35 + boardBob),
+    polygon("board-nose-graphic", "boardAccent", [
+      boardPoint(-9, -47),
+      boardPoint(6, -38),
+      boardPoint(7, -34),
+      boardPoint(-9, -43),
     ]),
-    ...(airborne > 0.12 ? [polygon("board-underside", "boardUnderside", [
-      point(11 + boardShear * 0.72, -48 + boardBob),
-      point(16 + boardShear * 0.6, -43 + boardBob),
-      point(18 - boardShear * 0.65, 46 + boardBob),
-      point(7 - boardShear, 58 + boardBob),
-      point(13 - boardShear * 0.65, 44 + boardBob),
-    ])] : []),
+    polygon("board-tail-graphic", "boardAccent", [
+      boardPoint(9, 38),
+      boardPoint(-7, 47),
+      boardPoint(-9, 51),
+      boardPoint(9, 42),
+    ]),
+    polygon("board-mark", "board", [
+      boardPoint(-3, -15),
+      boardPoint(3, -11),
+      boardPoint(3, 12),
+      boardPoint(-3, 16),
+    ]),
     polygon(
       "left-boot",
       "boots",
@@ -306,8 +310,8 @@ export function buildLowPolyRider(pose = {}) {
       point(rightShoulder.x - 4, rightShoulder.y + 7),
       point(leftShoulder.x + 4, leftShoulder.y + 10),
     ]),
-    polygon("left-arm", "jacketShadow", segment(leftShoulder, leftHand, 8)),
-    polygon("right-arm", "jacket", segment(rightShoulder, rightHand, 8)),
+    polygon("left-arm", "jacketShadow", limb(leftHand, leftElbow, leftShoulder, 8)),
+    polygon("right-arm", "jacket", limb(rightHand, rightElbow, rightShoulder, 8)),
     polygon("left-mitt", "mitts", rotatedRectangle(leftHand.x, leftHand.y, 8, 10, -0.18)),
     polygon("right-mitt", "mitts", rotatedRectangle(rightHand.x, rightHand.y, 8, 10, 0.18)),
     polygon("head", "helmet", [
@@ -371,12 +375,6 @@ export function buildLowPolyRider(pose = {}) {
       point(headCenter.x + 9, headCenter.y - 1),
       point(headCenter.x + 8, headCenter.y + 3),
       point(headCenter.x - 8, headCenter.y + 3),
-    ]),
-    polygon("goggle-lens", "goggleLens", [
-      point(headCenter.x - 6, headCenter.y - 2),
-      point(headCenter.x + 7, headCenter.y - 2),
-      point(headCenter.x + 5, headCenter.y + 2),
-      point(headCenter.x - 5, headCenter.y + 2),
     ]),
     polygon("scarf", "scarf", [
       point(shoulderCenter.x + 7, shoulderCenter.y - 10),
