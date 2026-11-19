@@ -1,8 +1,9 @@
 import { createRiderAnimator } from "./animation.js";
 import { createCameraState, stepCamera } from "./camera.js";
 import { createKeyboardControls } from "./controls.js";
-import { crashRiderOnHazard, createRiderState, stepRider } from "./physics.js";
+import { crashRiderOnHazard, createRiderState, riderSpeedRangeAt, stepRider } from "./physics.js";
 import { createRiderRenderer } from "./renderer.js";
+import { sideHitLipDistance, snowSurfaceHeight, snowSurfaceNormal } from "../mountain/terrain3d.js";
 
 const PHYSICS_STEP = 1 / 120;
 const clamp = (value, minimum, maximum) =>
@@ -10,8 +11,10 @@ const clamp = (value, minimum, maximum) =>
 
 export const setRiderSpeed = (state, targetSpeed) => {
   if (!Number.isFinite(targetSpeed) || targetSpeed <= 0 || state.crashed) return state;
+  const limits = riderSpeedRangeAt(state.position.downhill);
+  const adjustedSpeed = clamp(targetSpeed, limits.min, limits.max);
   const currentSpeed = Math.hypot(state.velocity.across, state.velocity.downhill);
-  const ratio = targetSpeed / Math.max(currentSpeed, 0.001);
+  const ratio = adjustedSpeed / Math.max(currentSpeed, 0.001);
   return createRiderState({
     ...state,
     velocity: {
@@ -30,7 +33,11 @@ export default async function setupRider(game) {
     ? { beginFrame() {}, draw() {} }
     : createRiderRenderer(game.canvas);
   const animator = createRiderAnimator();
-  let environment = Object.freeze({ surface: "powder" });
+  let environment = Object.freeze({
+    surface: "powder",
+    surfaceHeight: snowSurfaceHeight,
+    surfaceNormal: snowSurfaceNormal,
+  });
   let stance = "regular";
   let camera = createCameraState();
   let externalInput = Object.freeze({ carve: 0, crouch: 0, press: 0, steer: 0, stretch: 0 });
@@ -60,14 +67,17 @@ export default async function setupRider(game) {
         ? event.detail.slopeGrade
         : undefined,
       surface: event.detail?.surface ?? environment.surface,
+      surfaceHeight: snowSurfaceHeight,
+      surfaceNormal: snowSurfaceNormal,
     });
   });
 
   game.events.addEventListener("rider:pace", (event) => {
     if (!Number.isFinite(event.detail?.targetSpeed)) return;
+    const limits = riderSpeedRangeAt(state.position.downhill);
     pendingPace = {
       holdSeconds: Math.max(0, Number(event.detail?.holdSeconds) || 0),
-      targetSpeed: clamp(event.detail.targetSpeed, 12, 34),
+      targetSpeed: clamp(event.detail.targetSpeed, limits.min, limits.max),
     };
   });
 
@@ -131,7 +141,10 @@ export default async function setupRider(game) {
         state,
         { ...input, jump: pendingJump },
         PHYSICS_STEP,
-        environment,
+        {
+          ...environment,
+          lipDistance: sideHitLipDistance(state.position.across, state.position.downhill),
+        },
       );
       if (paceHold > 0 && state.speed > paceTarget) {
         state = setRiderSpeed(state, paceTarget);
@@ -153,6 +166,13 @@ export default async function setupRider(game) {
     }
     camera = stepCamera(camera, state, deltaSeconds);
     let pose = animator.step(state, frameInput, deltaSeconds);
+
+    const warning = clamp((state.impactMeter - 70) / 30, 0, 1);
+    const colorEffect = warning > 0
+      ? `saturate(${1 - warning * 0.78}) contrast(${1 + warning * 0.08})`
+      : "";
+    if (game.worldCanvas?.style) game.worldCanvas.style.filter = colorEffect;
+    if (game.canvas?.style) game.canvas.style.filter = colorEffect;
 
     renderer.beginFrame();
 

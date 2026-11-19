@@ -2,11 +2,15 @@
  * Owner 3 entry point: flow, HUD, scoring, audio, deployment, and mobile input.
  */
 import { COURSE } from "../mountain/index.js";
+import { SIDE_HIT_FIRST_LIP, SIDE_HIT_SPACING,
+  sideHitFeatureAt } from "../mountain/terrain3d.js";
+import { riderSpeedRangeAt } from "../rider/physics.js";
+import { createAirScoreTracker, stepAirScore } from "./scoring.js";
 
 const STORAGE_KEY = "slopestyle.bestDistance";
+const SCORE_STORAGE_KEY = "slopestyle.bestScore";
 const START_SPEED = 16;
-const MIN_COURSE_SPEED = 12;
-const MAX_SPEED = 34;
+const MAX_SPEED = 44;
 const HIT_WINDOW = 1.25;
 
 const clamp = (value, minimum, maximum) =>
@@ -19,7 +23,8 @@ export const courseSpeedForRider = (riderState) => {
 
   return riderState?.crashed
     ? Math.max(0, downhillSpeed)
-    : Math.max(MIN_COURSE_SPEED, downhillSpeed);
+    : Math.max(riderSpeedRangeAt(riderState?.position?.downhill).min,
+      downhillSpeed);
 };
 
 export const syncHazardsToRider = (hazards, riderDownhill) =>
@@ -47,17 +52,17 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
 const randomBetween = (minimum, maximum) =>
   minimum + Math.random() * (maximum - minimum);
 
-const getStoredBest = () => {
+const getStoredNumber = (key) => {
   try {
-    return Math.max(0, Number(localStorage.getItem(STORAGE_KEY)) || 0);
+    return Math.max(0, Number(localStorage.getItem(key)) || 0);
   } catch {
     return 0;
   }
 };
 
-const setStoredBest = (distance) => {
+const setStoredNumber = (key, value) => {
   try {
-    localStorage.setItem(STORAGE_KEY, String(Math.floor(distance)));
+    localStorage.setItem(key, String(Math.floor(value)));
   } catch {
     // Local storage is a convenience, not a requirement for play.
   }
@@ -89,10 +94,12 @@ const addInterfaceStyles = () => {
     .primary-action:focus-visible { outline: 3px solid #b5dce3; outline-offset: 3px; }
     .run-note { margin-top: 23px !important; color: #a7c0c4 !important; font-size: 0.78rem; }
     .run-stat { margin-top: 22px !important; color: #f6faf9 !important; font-size: 2.4rem; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
+    .trick-callout { position: absolute; left: 50%; top: 75px; transform: translateX(-50%); color: #fff7e8; font-size: clamp(0.8rem, 1.6vw, 1rem); font-weight: 800; letter-spacing: 0.11em; text-align: center; text-shadow: 0 2px 12px #1d3946; white-space: nowrap; }
+    .trick-callout strong { display: block; margin-top: 3px; font-size: clamp(1.4rem, 3vw, 2.2rem); letter-spacing: 0; }
     .fall-callout { border: 0; background: transparent; box-shadow: none; color: white; text-align: center; animation: fallaway 1.35s ease-in forwards; }
     .fall-callout h1 { font-size: clamp(2.6rem, 7vw, 5rem); }
     .is-hidden { display: none !important; }
-    @media (max-width: 560px) { #hud-root { inset: 12px 12px auto 12px; } .hud-card { min-width: 100px; padding: 8px 10px; } .overlay-panel { padding: 25px; } }
+    @media (max-width: 560px) { #hud-root { inset: 12px 12px auto 12px; } .hud-card { min-width: 90px; padding: 8px 10px; } .overlay-panel { padding: 25px; } }
     @keyframes fallaway {
       0% { opacity: 1; transform: translateY(-8vh) scale(1); }
       100% { opacity: 0; transform: translateY(28vh) scale(0.34); }
@@ -249,12 +256,26 @@ const createHud = (root) => {
       <span class="hud-label">Speed</span>
       <strong class="hud-value" data-speed>0<span class="hud-unit">km/h</span></strong>
     </div>
+    <div class="hud-card" aria-live="polite">
+      <span class="hud-label">Score</span>
+      <strong class="hud-value" data-score>0</strong>
+    </div>
+    <div class="trick-callout is-hidden" data-trick></div>
   `;
 
   return Object.freeze({
-    update({ distance, speed }) {
+    update({ distance, score, speed, trickNotice, trickNoticeTimer }) {
       root.querySelector("[data-distance]").textContent = `${Math.floor(distance)} m`;
       root.querySelector("[data-speed]").innerHTML = `${Math.round(speed * 3.6)}<span class="hud-unit">km/h</span>`;
+      root.querySelector("[data-score]").textContent = String(Math.floor(score));
+      const notice = root.querySelector("[data-trick]");
+      notice.classList.toggle("is-hidden", !trickNotice || trickNoticeTimer <= 0);
+      if (trickNotice && trickNoticeTimer > 0) {
+        notice.textContent = trickNotice.label;
+        const amount = document.createElement("strong");
+        amount.textContent = `+${trickNotice.points}`;
+        notice.append(amount);
+      }
     },
   });
 };
@@ -263,10 +284,14 @@ const spawnHazard = (state, riderDownhill) => {
   const actionRoll = Math.random();
   let kind = "steer";
   const worldDownhill = riderDownhill + COURSE.spawnDistance;
+  const sideHit = sideHitFeatureAt(Math.max(0,
+    Math.round((worldDownhill - SIDE_HIT_FIRST_LIP) / SIDE_HIT_SPACING)));
+  const clearSideHit = worldDownhill >= sideHit.start - 4 &&
+    worldDownhill <= sideHit.lip + 42;
 
-  if (state.dodged > 4 && actionRoll > 0.82) {
+  if (!clearSideHit && state.dodged > 4 && actionRoll > 0.82) {
     kind = "duck";
-  } else if (state.dodged > 2 && actionRoll > 0.64) {
+  } else if (!clearSideHit && state.dodged > 2 && actionRoll > 0.64) {
     kind = "jump";
   }
 
@@ -298,7 +323,9 @@ const spawnHazard = (state, riderDownhill) => {
 
   const lanes = [-0.66, -0.34, 0, 0.34, 0.66];
   const candidates = lanes.map((_, index) => index)
-    .filter((index) => index !== state.lastLane);
+    .filter((index) => index !== state.lastLane &&
+      (!clearSideHit || Math.abs(lanes[index] * COURSE.halfWidth -
+        sideHit.centerX) > 3.4));
   const lane = candidates[Math.floor(Math.random() * candidates.length)];
   state.lastLane = lane;
   return {
@@ -315,10 +342,15 @@ const spawnHazard = (state, riderDownhill) => {
 const nextSpawnDistance = (speed) =>
   randomBetween(clamp(40 - speed * 0.25, 28, 40), clamp(58 - speed * 0.35, 37, 55));
 
-const emptyRunState = (best) => ({
+const emptyRunState = (best, bestScore = 0) => ({
   best,
+  bestScore,
   crashFx: 0,
   distance: 0,
+  score: 0,
+  trickPoints: 0,
+  trickNotice: null,
+  trickNoticeTimer: 0,
   dodged: 0,
   fallTimer: 0,
   finalDistance: 0,
@@ -336,9 +368,11 @@ export default async function setupGameLoop(game) {
 
   const audio = createAudioController();
   const hud = createHud(game.hudRoot);
-  let state = emptyRunState(getStoredBest());
+  let state = emptyRunState(getStoredNumber(STORAGE_KEY), getStoredNumber(SCORE_STORAGE_KEY));
   let lastFrameAt;
   let lastJumpValue = 0;
+  let previousRiderState;
+  let airScoreTracker = createAirScoreTracker();
 
   const resizeCanvas = () => {
     const rect = game.canvas.getBoundingClientRect();
@@ -365,9 +399,9 @@ export default async function setupGameLoop(game) {
       <div class="overlay-panel">
         <p class="overlay-kicker">An endless descent</p>
         <h1>Slopestyle</h1>
-        <p>Read the terrain, set an edge, and find a line through the mountain.</p>
+        <p>Read the terrain, set an edge, and find a line through the mountain. Cut toward the flagged side hits, grab or spin, and land clean for trick points. The pace builds as you descend.</p>
         <button class="primary-action" type="button" data-start>Drop in</button>
-        <p class="run-note">A/D carve · ←/→ flick or skid · ↓ crouch · W/S shift weight · Space or ↑ jump<br>Best run: ${Math.floor(state.best)} m</p>
+        <p class="run-note">A/D carve · ←/→ flick or skid · ↓ crouch or grab · W/S shift weight · Space or ↑ jump<br>Best run: ${Math.floor(state.best)} m · Best score: ${Math.floor(state.bestScore)}</p>
       </div>
     `;
     game.overlayRoot.querySelector("[data-start]").addEventListener("click", startRun, {
@@ -380,8 +414,8 @@ export default async function setupGameLoop(game) {
       <div class="overlay-panel">
         <p class="overlay-kicker">Run ended</p>
         <h1>Back to the top</h1>
-        <p class="run-stat">${Math.floor(state.finalDistance)} m</p>
-        <p>Best run: ${Math.floor(state.best)} m</p>
+        <p class="run-stat">${Math.floor(state.score)} points</p>
+        <p>${Math.floor(state.finalDistance)} m ridden · Best run: ${Math.floor(state.best)} m · Best score: ${Math.floor(state.bestScore)}</p>
         <button class="primary-action" type="button" data-restart>Ride again</button>
       </div>
     `;
@@ -400,13 +434,15 @@ export default async function setupGameLoop(game) {
 
   const startRun = () => {
     state = {
-      ...emptyRunState(state.best),
+      ...emptyRunState(state.best, state.bestScore),
       phase: "running",
       spawnLeft: 4,
       speed: START_SPEED,
     };
     lastFrameAt = undefined;
     lastJumpValue = 0;
+    previousRiderState = undefined;
+    airScoreTracker = createAirScoreTracker();
     game.overlayRoot.innerHTML = "";
     game.events.dispatchEvent(
       new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
@@ -419,7 +455,9 @@ export default async function setupGameLoop(game) {
     state.finalDistance = state.distance;
     state.crashFx = 0.8;
     state.best = Math.max(state.best, Math.floor(state.distance));
-    setStoredBest(state.best);
+    state.bestScore = Math.max(state.bestScore, Math.floor(state.score));
+    setStoredNumber(STORAGE_KEY, state.best);
+    setStoredNumber(SCORE_STORAGE_KEY, state.bestScore);
     audio.stopRide();
 
     if (reason === "cliff") {
@@ -462,12 +500,17 @@ export default async function setupGameLoop(game) {
     lastJumpValue = input.jump;
 
     state.speed = riderState.speed;
-    state.distance += courseSpeed * delta;
+    state.distance += Math.max(downhillProgress, courseSpeed * delta);
+    state.score = Math.floor(state.distance) + state.trickPoints;
+    state.trickNoticeTimer = Math.max(0, state.trickNoticeTimer - delta);
     state.spawnLeft -= downhillProgress;
 
     if (state.spawnLeft <= 0) {
-      state.hazards.push(spawnHazard(state, riderDownhill));
-      state.nextHazardId += 1;
+      const hazard = spawnHazard(state, riderDownhill);
+      if (hazard) {
+        state.hazards.push(hazard);
+        state.nextHazardId += 1;
+      }
       state.spawnLeft = nextSpawnDistance(state.speed);
     }
 
@@ -485,6 +528,18 @@ export default async function setupGameLoop(game) {
     }
 
     state.hazards = state.hazards.filter((hazard) => hazard.z > -5);
+    const scoreResult = stepAirScore(airScoreTracker,
+      previousRiderState ?? riderState, riderState, detail.pose);
+    airScoreTracker = scoreResult.tracker;
+    previousRiderState = riderState;
+    if (scoreResult.award) {
+      state.trickPoints += scoreResult.award.points;
+      state.score = Math.floor(state.distance) + state.trickPoints;
+      state.trickNotice = scoreResult.award;
+      state.trickNoticeTimer = 1.9;
+      state.bestScore = Math.max(state.bestScore, state.score);
+      setStoredNumber(SCORE_STORAGE_KEY, state.bestScore);
+    }
   };
 
   const updateFalling = (delta) => {

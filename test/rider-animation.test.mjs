@@ -115,6 +115,29 @@ test("holding crouch in the air reaches down for a grab", () => {
   assert.ok(pose.grab > 0.5);
 });
 
+test("the grab reaches the board quickly and releases smoothly", () => {
+  const animator = createRiderAnimator();
+  const airborne = createRiderState({ air: 1.5, verticalVelocity: 0 });
+  animator.step(airborne, {}, 1 / 60);
+  const first = animator.step(airborne, { crouch: 1 }, 1 / 60);
+  let held = first;
+  for (let frame = 0; frame < 8; frame += 1) {
+    held = animator.step(airborne, { crouch: 1 }, 1 / 60);
+  }
+  const released = animator.step(airborne, {}, 1 / 60);
+  assert.ok(first.grab > 0 && first.grab < held.grab);
+  assert.ok(held.grab > 0.8);
+  assert.ok(released.grab < held.grab && released.grab > 0);
+});
+
+test("rough snow loads the rider's legs and flexes the board", () => {
+  const calm = getRiderPose(createRiderState({ surface: "powder" }));
+  const rough = getRiderPose(createRiderState({ surface: "powder",
+    bumpImpact: 0.9, compression: 0.8, chatter: 0.7 }));
+  assert.ok(rough.snowResponse > calm.snowResponse + 0.5);
+  assert.ok(rough.boardFlex > calm.boardFlex + 0.3);
+});
+
 test("a deep low carve reaches for a hand drag", () => {
   const pose = getRiderPose(
     createRiderState({ edge: 1, lean: 1 }),

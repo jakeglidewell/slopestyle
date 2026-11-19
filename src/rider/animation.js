@@ -33,6 +33,8 @@ export function getRiderPose(state, input = {}) {
   const slash = clamp(state.slash ?? 0, 0, 1);
   const bumpImpact = clamp(state.bumpImpact ?? 0, 0, 1);
   const chatter = clamp(state.chatter ?? 0, 0, 1);
+  const impactWarning = clamp((finiteOr(state.impactMeter) - 70) / 30, 0, 1);
+  const impactWobble = Math.sin(elapsed * 11.5) * impactWarning * 0.055;
   const requestedCrouch = clamp(
     Number.isFinite(input.crouch) ? input.crouch : 0,
     0,
@@ -53,7 +55,7 @@ export function getRiderPose(state, input = {}) {
   const bodyTilt = clamp(
     finiteOr(state.lean, state.edge) * (0.2 + speedLean * 0.58) *
       (1 - airborne * 0.6) +
-      edgeDirection * gForce * 0.055 + idleSway,
+      edgeDirection * gForce * 0.055 + idleSway + impactWobble,
     -0.8,
     0.8,
   );
@@ -99,7 +101,8 @@ export function getRiderPose(state, input = {}) {
       finiteOr(state.edge) * (0.26 + speedLean * 0.79) *
         (state.surface === "rail" ? 0.1 : 1 - airborne * 0.7) + restingEdge +
         finiteOr(state.terrainRoll) * 0.18 +
-        Math.sin(chatterPhase * 3.1) * chatter * 0.012,
+        Math.sin(chatterPhase * 3.1) * chatter * 0.012 +
+        impactWobble * 0.5,
       -1.08,
       1.08,
     ),
@@ -108,10 +111,12 @@ export function getRiderPose(state, input = {}) {
     boardFlex: clamp(
       Math.abs(finiteOr(state.pressAmount)) * 0.55 +
         gForce * 0.22 + finiteOr(state.popCharge) * 0.35 +
-        compression * 0.3,
+        compression * 0.45 + bumpImpact * 0.16,
       0,
       1,
     ),
+    snowResponse: clamp(compression * 0.55 + bumpImpact * 0.5 + chatter * 0.12,
+      0, 1),
     boardYaw: state.boardYaw ?? state.heading,
     bodyYaw: state.torsoYaw ?? state.heading,
     bodySpin:
@@ -132,7 +137,7 @@ export function getRiderPose(state, input = {}) {
       (state.noseFloat ?? 0) * 0.12 +
       (state.pressAmount ?? 0) * 0.15,
     boardSlip: clamp(state.slipAngle ?? 0, -0.75, 0.75),
-    boardTweak: clamp(state.tweak ?? 0, -1, 1) * 1.55,
+    boardTweak: clamp(state.tweak ?? 0, -1, 1) * 1.35,
     butter: clamp(state.butter ?? 0, 0, 1),
     press: clamp(
       (state.pressAmount ?? 0) + (state.butter ?? 0) * 0.7,
@@ -143,8 +148,8 @@ export function getRiderPose(state, input = {}) {
       0.28 +
         speedLean * 0.08 +
         edgeAmount * 0.38 +
-        loadedCrouch * 0.48 +
-        requestedCrouch * 0.05 +
+        loadedCrouch * 0.52 +
+        requestedCrouch * 0.22 +
         airborne * 0.34 +
         apexTuck * 0.18 -
         airOpen * 0.2 -
@@ -225,7 +230,7 @@ export function getRiderPose(state, input = {}) {
     stumble: clamp(
       crashCollapse + finiteOr(state.washout) * 0.8 +
         Math.max(0, finiteOr(state.landingImpact) - 3) * 0.1 +
-        finiteOr(state.bumpImpact) * 0.2,
+        finiteOr(state.bumpImpact) * 0.2 + impactWarning * 0.28,
       0,
       1,
     ),
@@ -257,6 +262,7 @@ export function createRiderAnimator() {
     arm: createSpring(),
     cloth: createSpring(),
     crouch: createSpring(),
+    grab: createSpring(),
     head: createSpring(),
     hips: createSpring(),
     lean: createSpring(),
@@ -275,6 +281,7 @@ export function createRiderAnimator() {
         arm: createSpring(),
         cloth: createSpring(),
         crouch: createSpring(),
+        grab: createSpring(),
         head: createSpring(),
         hips: createSpring(),
         lean: createSpring(),
@@ -329,8 +336,10 @@ export function createRiderAnimator() {
         -boardSwing * 0.9 - hipTwist * 0.22, 1.8, delta, 0.68);
       const bodyTilt = advanceSpring(layers.lean, target.bodyTilt, 3, delta);
       const crouch = advanceSpring(layers.crouch, target.crouch,
-        target.crouch > layers.crouch.value ? 5 : 1.9, delta, 0.7);
+        target.crouch > layers.crouch.value ? 6.5 : 1.9, delta, 0.7);
       const stumble = advanceSpring(layers.stumble, target.stumble, 2.4, delta);
+      const grab = advanceSpring(layers.grab, target.grab,
+        target.grab > layers.grab.value ? 5.5 : 4, delta, 0.86);
 
       return Object.freeze({
         ...target,
@@ -339,6 +348,7 @@ export function createRiderAnimator() {
         boardSwing,
         clothLag,
         crouch: clamp(crouch, 0, 1),
+        grab: clamp(grab, 0, 1),
         headLook,
         hipTwist,
         lean: clamp(bodyTilt / 0.78, -1.04, 1.04),

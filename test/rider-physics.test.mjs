@@ -45,7 +45,7 @@ test("moving through powder produces physical bump contact", () => {
   assert.ok(strongestBump > 0.2 && Math.abs(state.terrainHeight) > 0.01);
 });
 
-test("a fast rider gets released by a powder crest unless crouched", () => {
+test("crouching absorbs most of a powder crest's upward kick", () => {
   const speed = 26;
   const frameTravel = speed / 60;
   let crest = 0;
@@ -71,11 +71,13 @@ test("a fast rider gets released by a powder crest unless crouched", () => {
     terrainPitch: terrain.slope,
   });
   const launched = stepRider(initial, {}, 1 / 60, { surface: "powder" });
-  const absorbed = stepRider(initial, { crouch: 1 }, 1 / 60, {
+  const loaded = createRiderState({ ...initial, stanceHeight: 0.45,
+    crouchAmount: 1, crouchHeld: true });
+  const absorbed = stepRider(loaded, { crouch: 1 }, 1 / 60, {
     surface: "powder",
   });
 
-  assert.ok(launched.air > 0 && absorbed.air === 0);
+  assert.ok(launched.air > 0 && absorbed.air < launched.air * 0.25);
 });
 
 test("speed and rear-foot pressure float the nose in powder", () => {
@@ -206,6 +208,25 @@ test("jump input launches a grounded rider", () => {
   const state = stepRider(createRiderState(), { jump: 1 }, 1 / 60);
 
   assert.ok(state.air > 0 && state.verticalVelocity > 0);
+});
+
+test("a manual pop clears rising powder bumps instead of disappearing", () => {
+  for (let downhill = 0; downhill <= 250; downhill += 5) {
+    let state = createRiderState({
+      position: { across: 0, downhill },
+      speed: 20,
+      surface: "powder",
+    });
+    let peak = 0;
+    let airborneFrames = 0;
+    for (let frame = 0; frame < 48; frame += 1) {
+      state = stepRider(state, { jump: Number(frame === 0) }, 1 / 120, { surface: "powder" });
+      peak = Math.max(peak, state.air);
+      if (state.air > 0.02) airborneFrames += 1;
+    }
+    assert.ok(peak > 0.18 && airborneFrames > 14,
+      `pop at ${downhill} m reached ${peak.toFixed(2)} m for ${airborneFrames} frames`);
+  }
 });
 
 test("an airborne rider falls and lands back on the snow", () => {
@@ -391,17 +412,19 @@ test("tucking increases a locked airborne spin rate", () => {
 });
 
 test("air controls allow a small spin correction and an up-arrow stretch", () => {
-  let neutral = createRiderState({ air: 1, speed: 18, spinVelocity: 1.5 });
+  let neutral = createRiderState({ air: 1, speed: 18, spinVelocity: 1.5,
+    stanceHeight: 0.45, crouchAmount: 1 });
   let corrected = neutral;
   let stretched = neutral;
 
-  for (let frame = 0; frame < 30; frame += 1) {
+  for (let frame = 0; frame < 20; frame += 1) {
     neutral = stepRider(neutral, {}, 1 / 60);
     corrected = stepRider(corrected, { carve: 1 }, 1 / 60);
     stretched = stepRider(stretched, { stretch: 1 }, 1 / 60);
   }
 
   assert.ok(
+    neutral.air > 0 && corrected.air > 0 && stretched.air > 0 &&
     corrected.spinVelocity > neutral.spinVelocity &&
       Math.abs(stretched.boardYaw) < Math.abs(neutral.boardYaw),
   );

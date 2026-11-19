@@ -93,11 +93,11 @@ test("an uncharged hop and a loaded ollie reach their distinct heights", () => {
     { surface: "groomed" },
   ));
 
-  assert.ok(neutral > 0.25 && neutral < 0.65, `neutral hop ${neutral}`);
-  assert.ok(loaded > 0.9 && loaded < 1.45, `loaded ollie ${loaded}`);
+  assert.ok(neutral > 0.55 && neutral < 0.85, `neutral hop ${neutral}`);
+  assert.ok(loaded > neutral * 3 && loaded < 3.5, `loaded ollie ${loaded}`);
 });
 
-test("a badly landed jump slams while a small impact is absorbed", () => {
+test("a hard landing loads the impact meter without ending the run at once", () => {
   const soft = stepRider(
     createRiderState({ air: 0.03, verticalVelocity: -3, speed: 18 }),
     {},
@@ -111,7 +111,8 @@ test("a badly landed jump slams while a small impact is absorbed", () => {
 
   assert.equal(soft.crashed, false);
   assert.ok(soft.compression > 0);
-  assert.equal(hard.crashReason, "landing-impact");
+  assert.equal(hard.crashed, false);
+  assert.ok(hard.impactMeter > soft.impactMeter);
 });
 
 test("an airborne spin stays visually continuous through the angle wrap", () => {
