@@ -166,6 +166,26 @@ export function createRiderState(overrides = {}) {
   });
 }
 
+export function crashRiderOnHazard(state, hazard = {}) {
+  if (state.crashed) return state;
+  const spin = Math.sign(
+    state.velocity.across || hazard.x - state.position.across || state.edge || 1,
+  );
+  return createRiderState({
+    ...state,
+    air: 0,
+    compression: 1,
+    crashed: true,
+    crashReason: "hazard",
+    crashSpin: spin,
+    crashTimer: CRASH_RECOVERY,
+    velocity: {
+      across: state.velocity.across * 0.45,
+      downhill: state.velocity.downhill * 0.45,
+    },
+  });
+}
+
 const sampleSlopeGrade = (downhill) =>
   0.36 +
   Math.sin(downhill * 0.024 - 0.3) * 0.2 +

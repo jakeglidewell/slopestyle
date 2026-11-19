@@ -65,4 +65,10 @@ test("the rider loop publishes state and draws a low-poly frame", async (context
       update.camera &&
       fillCount >= 18,
   );
+
+  const impact = new Event("rider:impact");
+  impact.detail = { kind: "steer", x: 0 };
+  game.events.dispatchEvent(impact);
+  frames.shift()(32);
+  assert.equal(update.state.crashed, true);
 });

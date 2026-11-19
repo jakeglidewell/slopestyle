@@ -1,23 +1,41 @@
 import { buildLowPolyRider } from "./model.js";
 
 export const PROTOTYPE_RIDER_PALETTE = Object.freeze({
-  board: "#22d3ee",
-  boardShadow: "#0891b2",
-  boots: "#0f172a",
+  board: "#f16e50",
+  boardAccent: "#f4e9d8",
+  boardBase: "#a8453f",
+  boardEdge: "#f8fafc",
+  boardSide: "#a94b40",
+  boardShadow: "#29354e",
+  boots: "#202a40",
+  bootsTop: "#46536d",
   carveTrace: "rgba(71, 125, 148, 0.58)",
   flatTrace: "rgba(116, 174, 194, 0.18)",
-  helmet: "#ecfeff",
-  helmetShadow: "#94a3b8",
-  jacket: "#0891b2",
-  jacketShadow: "#155e75",
-  mitts: "#0f172a",
-  pants: "#334155",
-  pantsShadow: "#0f172a",
+  goggles: "#182438",
+  goggleLens: "#8ed4d9",
+  helmet: "#f16e50",
+  helmetBand: "#29354e",
+  helmetHighlight: "#ff9b78",
+  helmetSide: "#d75b49",
+  helmetShadow: "#b74840",
+  mitts: "#202a40",
+  pantCuff: "#26324b",
+  pants: "#657391",
+  pantsFold: "#35415c",
+  pantsSide: "#3c4967",
+  pantsShadow: "#4c5a78",
   powderTrace: "rgba(85, 159, 185, 0.24)",
   pressTrace: "rgba(71, 125, 148, 0.32)",
   shadow: "rgba(15, 23, 42, 0.22)",
   skidTrace: "rgba(116, 174, 194, 0.3)",
+  skin: "#dca67f",
+  sleeve: "#f16e50",
+  sleeveLight: "#ff9d77",
+  sleeveShadow: "#bc4d42",
   snowSpray: "#b9e9f5",
+  tee: "#f4e9d8",
+  teeLight: "#fff9ec",
+  teeShadow: "#d7c8b9",
 });
 
 const clamp = (value, minimum, maximum) =>
@@ -273,7 +291,7 @@ export function drawLowPolyRider(context, model, options = {}) {
     }
 
     context.closePath();
-    context.fillStyle = palette[polygon.tone];
+    context.fillStyle = palette[polygon.tone] ?? palette.board;
     context.fill();
     context.restore();
   }
@@ -321,6 +339,18 @@ export function createRiderRenderer(
         viewportCenter: canvas.width / 2,
       });
 
+      if (pose.handDrag > 0.55) {
+        const dragSide = Math.sign(pose.lean || state.edge || 1);
+        drawCarveTrace(context, {
+          edge: dragSide,
+          palette,
+          quality: pose.handDrag,
+          scale: viewportScale,
+          x: riderX + dragSide * 28 * viewportScale,
+          y: groundY + 5 * viewportScale,
+        });
+      }
+
       drawSnowSpray(context, {
         direction: -Math.sign(state.slipAngle || state.edge || 1),
         intensity: pose.spray,
@@ -331,13 +361,31 @@ export function createRiderRenderer(
       });
 
       context.save();
+      context.translate(riderX + 9 * viewportScale, groundY + 11 * viewportScale);
+      context.rotate((Number(pose.boardSwing) || 0) * 0.7);
+      context.scale(viewportScale * shadowScale, viewportScale * shadowScale);
+      context.fillStyle = "rgba(26, 65, 83, 0.13)";
+      context.beginPath();
+      context.moveTo(-8, -51);
+      context.lineTo(8, -51);
+      context.lineTo(12, -44);
+      context.lineTo(12, 43);
+      context.lineTo(8, 51);
+      context.lineTo(-8, 51);
+      context.lineTo(-12, 43);
+      context.lineTo(-12, -44);
+      context.closePath();
+      context.fill();
+      context.restore();
+
+      context.save();
       context.fillStyle = palette.shadow;
       context.beginPath();
       context.ellipse(
-        riderX,
-        groundY + 10 * viewportScale,
-        24 * viewportScale * shadowScale,
-        7 * viewportScale * shadowScale,
+        riderX + 9 * viewportScale,
+        groundY + 14 * viewportScale,
+        28 * viewportScale * shadowScale,
+        9 * viewportScale * shadowScale,
         0,
         0,
         Math.PI * 2,
@@ -346,9 +394,6 @@ export function createRiderRenderer(
       context.restore();
 
       drawLowPolyRider(context, buildLowPolyRider(pose), {
-        boardTweak:
-          (pose.boardBodyRotation ?? normalizeAngle(pose.boardYaw - pose.bodyYaw)) * 0.78 +
-          pose.boardTweak,
         palette,
         rotation:
           (pose.airborne > 0

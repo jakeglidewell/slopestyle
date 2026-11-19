@@ -8,6 +8,7 @@ test("the shared page exposes stable game mount points", async () => {
   const html = await readFile(new URL("index.html", projectUrl), "utf8");
 
   assert.match(html, /id="game-canvas"/);
+  assert.match(html, /id="world-canvas"/);
   assert.match(html, /id="hud-root"/);
   assert.match(html, /id="overlay-root"/);
   assert.match(html, /src="\.\/src\/main\.js"/);

@@ -2,10 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  crashRiderOnHazard,
   createRiderState,
   sampleSnowTerrain,
   stepRider,
 } from "../src/rider/physics.js";
+
+test("hitting an obstacle makes the rider tumble and lose speed", () => {
+  const riding = createRiderState({
+    position: { across: 1, downhill: 20 },
+    surface: "powder",
+    velocity: { across: 2, downhill: 18 },
+  });
+  const crashed = crashRiderOnHazard(riding, { kind: "steer", x: 1 });
+
+  assert.equal(crashed.crashed, true);
+  assert.equal(crashed.crashTimer, 2);
+  assert.deepEqual(crashed.position, riding.position);
+  assert.ok(crashed.speed < riding.speed * 0.6);
+  assert.equal(stepRider(crashed, {}, 1 / 60, { surface: "powder" }).crashed, true);
+});
 
 test("snow terrain is deterministic and rougher in powder", () => {
   const position = { across: 1.25, downhill: 42 };

@@ -4,13 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Slopestyle</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #8baab9; }
+      #game-root { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+      #world-canvas, #game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .boot-status { position: absolute; top: 50%; left: 50%; margin: 0;
+        transform: translate(-50%, -50%); color: #f2f6f5;
+        font: 700 0.8rem system-ui, sans-serif; letter-spacing: 0.18em; text-transform: uppercase; }
+    </style>
   </head>
   <body>
     <!-- Shared shell: add game features through the owner modules, not here. -->
     <main id="game-root">
+      <canvas id="world-canvas" aria-hidden="true"></canvas>
       <canvas id="game-canvas" aria-label="Slopestyle game"></canvas>
       <section id="hud-root" aria-label="Game status"></section>
-      <section id="overlay-root" aria-live="polite"></section>
+      <section id="overlay-root" aria-live="polite"><p class="boot-status">Loading mountain</p></section>
     </main>
 
     <script type="module" src="./src/main.js"></script>
