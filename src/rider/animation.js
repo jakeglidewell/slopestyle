@@ -115,6 +115,9 @@ export function getRiderPose(state, input = {}) {
           0,
           1,
         ),
+    scarfFlutter:
+      clamp((state.speed ?? 0) / 34, 0, 1) *
+      Math.sin((Number(state.elapsed) || 0) * (5 + (state.speed ?? 0) * 0.18)),
     stance: state.stance ?? "regular",
     switchRiding: Boolean(state.switchRiding),
     toeSide,

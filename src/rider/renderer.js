@@ -1,23 +1,29 @@
 import { buildLowPolyRider } from "./model.js";
 
 export const PROTOTYPE_RIDER_PALETTE = Object.freeze({
-  board: "#22d3ee",
-  boardShadow: "#0891b2",
-  boots: "#0f172a",
+  board: "#18364f",
+  boardAccent: "#61e2e8",
+  boardShadow: "#2b6e80",
+  boardUnderside: "#f5a357",
+  boots: "#152536",
   carveTrace: "rgba(71, 125, 148, 0.58)",
   flatTrace: "rgba(116, 174, 194, 0.18)",
-  helmet: "#ecfeff",
-  helmetShadow: "#94a3b8",
-  jacket: "#0891b2",
-  jacketShadow: "#155e75",
-  mitts: "#0f172a",
-  pants: "#334155",
-  pantsShadow: "#0f172a",
+  goggleLens: "#89f0eb",
+  goggleStrap: "#10243a",
+  helmet: "#20354a",
+  helmetShadow: "#10243a",
+  jacket: "#ef7954",
+  jacketAccent: "#ffe3af",
+  jacketShadow: "#bc5147",
+  mitts: "#17283a",
+  pants: "#183c54",
+  pantsShadow: "#10283b",
   powderTrace: "rgba(85, 159, 185, 0.24)",
   pressTrace: "rgba(71, 125, 148, 0.32)",
-  shadow: "rgba(15, 23, 42, 0.22)",
+  scarf: "#f6cd75",
+  shadow: "rgba(15, 42, 58, 0.24)",
   skidTrace: "rgba(116, 174, 194, 0.3)",
-  snowSpray: "#b9e9f5",
+  snowSpray: "#ffffff",
 });
 
 const clamp = (value, minimum, maximum) =>
@@ -273,7 +279,7 @@ export function drawLowPolyRider(context, model, options = {}) {
     }
 
     context.closePath();
-    context.fillStyle = palette[polygon.tone];
+    context.fillStyle = palette[polygon.tone] ?? palette.jacket;
     context.fill();
     context.restore();
   }
@@ -290,15 +296,15 @@ export function createRiderRenderer(
   if (!context) {
     throw new Error("Rider rendering requires a 2D canvas context");
   }
-  const snowTrack = createSnowTrackTrail();
-
   return Object.freeze({
     beginFrame() {
       context.clearRect(0, 0, canvas.width, canvas.height);
     },
     draw({ camera, pose, state }) {
       const zoom = clamp(Number(camera.zoom) || 1, 0.82, 1);
-      const viewportScale = clamp(canvas.width / 480, 0.8, 1.6) * zoom;
+      const viewportScale = clamp(
+        Math.min(canvas.width / 700, canvas.height / 500), 1.1, 2.4,
+      ) * zoom;
       const cameraLag =
         (state.position.across - camera.position.across) * 14 * zoom;
       const jumpLift = getJumpLift(canvas, state.air);
@@ -310,22 +316,12 @@ export function createRiderRenderer(
       context.translate(canvas.width / 2, canvas.height / 2);
       context.rotate(-(Number(camera.roll) || 0));
       context.translate(-canvas.width / 2, -canvas.height / 2);
-      snowTrack.update(state);
-      drawSnowTracks(context, snowTrack.points(), {
-        cameraAcross: camera.position.across,
-        currentDownhill: state.position.downhill,
-        groundY,
-        palette,
-        scale: viewportScale,
-        surface: state.surface,
-        viewportCenter: canvas.width / 2,
-      });
-
       drawSnowSpray(context, {
         direction: -Math.sign(state.slipAngle || state.edge || 1),
         intensity: pose.spray,
         palette,
         scale: viewportScale,
+        surface: state.surface,
         x: riderX,
         y: groundY + 4 * viewportScale,
       });
@@ -353,7 +349,7 @@ export function createRiderRenderer(
         rotation:
           (pose.airborne > 0
             ? pose.bodySpin
-            : clamp(normalizeAngle(pose.bodyYaw) * 0.12, -0.4, 0.4)) +
+            : clamp(normalizeAngle(pose.bodyYaw) * 0.12 + pose.lean * 0.08, -0.4, 0.4)) +
           pose.fallRotation,
         scale: viewportScale,
         x: riderX,

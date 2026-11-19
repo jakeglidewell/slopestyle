@@ -52,27 +52,39 @@ const addInterfaceStyles = () => {
   style.dataset.slopestyleStyles = "true";
   style.textContent = `
     * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; overflow: hidden; background: #dff7ff; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    #game-root { position: relative; width: 100vw; height: 100vh; overflow: hidden; color: #102033; }
+    html, body { margin: 0; min-height: 100%; overflow: hidden; background: #c5e8ed; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #game-root { position: relative; width: 100vw; height: 100vh; overflow: hidden; color: #10283a; }
     #game-canvas { display: block; width: 100%; height: 100%; }
-    #hud-root { position: absolute; inset: 18px 22px auto 22px; display: flex; justify-content: space-between; pointer-events: none; }
-    .hud-card { min-width: 136px; border: 2px solid rgba(16, 32, 51, 0.16); border-radius: 8px; padding: 10px 12px; background: rgba(255, 255, 255, 0.78); box-shadow: 0 8px 24px rgba(40, 71, 90, 0.12); }
-    .hud-label { display: block; color: #517085; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; }
-    .hud-value { display: block; margin-top: 2px; font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 900; line-height: 1; }
+    #hud-root { position: absolute; top: clamp(14px, 3vh, 32px); left: 50%; width: min(1120px, calc(100% - 40px)); transform: translateX(-50%); display: flex; justify-content: space-between; align-items: flex-start; pointer-events: none; }
+    .hud-card { min-width: clamp(136px, 16vw, 188px); border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 16px; padding: 12px 18px 14px; background: rgba(19, 51, 68, 0.84); box-shadow: 0 12px 30px rgba(20, 55, 72, 0.2), inset 0 1px 0 rgba(255,255,255,0.12); color: #fff; backdrop-filter: blur(10px); }
+    .hud-card:first-child { border-bottom: 3px solid #6de3df; }
+    .hud-card:nth-child(2) { border-bottom: 3px solid #f3c579; text-align: right; }
+    .hud-label { display: block; color: #b8e3e9; font-size: clamp(0.7rem, 1.2vw, 0.82rem); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+    .hud-value { display: block; margin-top: 3px; font-size: clamp(1.55rem, 3vw, 2.45rem); font-weight: 900; letter-spacing: -0.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .run-feedback { position: absolute; left: 50%; top: 88px; transform: translateX(-50%); min-width: 170px; border-radius: 999px; padding: 8px 16px; background: rgba(23, 67, 77, 0.82); color: #fff; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.12em; text-align: center; text-transform: uppercase; opacity: 0; transition: opacity 0.14s ease; white-space: nowrap; }
+    .run-feedback.is-visible { opacity: 1; }
     #overlay-root { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: none; }
-    .overlay-panel { width: min(520px, 92vw); border: 2px solid rgba(16, 32, 51, 0.14); border-radius: 8px; padding: clamp(22px, 4vw, 34px); background: rgba(255, 255, 255, 0.84); box-shadow: 0 18px 50px rgba(20, 49, 69, 0.18); text-align: center; pointer-events: auto; }
-    .overlay-panel h1 { margin: 0 0 8px; font-size: clamp(2.4rem, 7vw, 4.5rem); line-height: 0.95; letter-spacing: 0; color: #17324a; }
-    .overlay-panel p { margin: 10px 0 0; color: #425c70; line-height: 1.45; }
-    .primary-action { min-width: 190px; margin-top: 18px; border: 0; border-radius: 8px; padding: 15px 24px; background: #22c55e; color: white; cursor: pointer; font: inherit; font-size: 1.12rem; font-weight: 900; box-shadow: 0 10px 24px rgba(34, 197, 94, 0.28); }
-    .primary-action:focus-visible { outline: 4px solid rgba(34, 197, 94, 0.35); outline-offset: 3px; }
-    .run-note { font-size: 0.9rem; }
+    .overlay-panel { width: min(540px, 92vw); border: 1px solid rgba(255,255,255,0.46); border-radius: 24px; padding: clamp(24px, 4vw, 40px); background: linear-gradient(150deg, rgba(18, 56, 75, 0.94), rgba(26, 84, 96, 0.91)); box-shadow: 0 24px 60px rgba(18, 58, 75, 0.28), inset 0 1px 0 rgba(255,255,255,0.2); text-align: center; color: #fff; pointer-events: auto; backdrop-filter: blur(12px); }
+    .overlay-panel h1 { margin: 4px 0 10px; font-size: clamp(2.7rem, 7vw, 4.8rem); line-height: 0.94; letter-spacing: -0.06em; color: #fff; text-shadow: 0 4px 18px rgba(0,0,0,0.16); }
+    .overlay-panel p { margin: 12px 0 0; color: #cce8e9; line-height: 1.5; }
+    .overlay-eyebrow { color: #8df0dc !important; font-size: 0.8rem; font-weight: 900; letter-spacing: 0.22em; text-transform: uppercase; }
+    .primary-action { min-width: 220px; margin-top: 24px; border: 0; border-radius: 12px; padding: 16px 26px; background: #31bc76; color: #fff; cursor: pointer; font: inherit; font-size: 1.14rem; font-weight: 900; box-shadow: 0 12px 25px rgba(10, 42, 46, 0.25); transition: transform 0.12s ease, background 0.12s ease; }
+    .primary-action:hover { background: #3bd389; transform: translateY(-2px); }
+    .primary-action:focus-visible { outline: 4px solid #b5ffe0; outline-offset: 3px; }
+    .run-note { margin-top: 20px !important; border-top: 1px solid rgba(255,255,255,0.16); padding-top: 16px; font-size: 0.87rem; }
     .fall-callout { border: 0; background: transparent; box-shadow: none; color: #17324a; animation: fallaway 1.35s ease-in forwards; }
     .fall-callout h1 { font-size: clamp(2.8rem, 9vw, 6rem); }
     .is-hidden { display: none !important; }
+    #game-root.is-crashed #game-canvas { animation: crash-jolt 0.36s ease-out; }
+    #game-root.is-crashed::after { content: ""; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; animation: crash-flash 0.35s ease-out; }
+    @keyframes crash-jolt { 0% { transform: translate(0,0); } 22% { transform: translate(-9px,5px); } 50% { transform: translate(7px,-4px); } 100% { transform: translate(0,0); } }
+    @keyframes crash-flash { 0% { opacity: 0.45; } 100% { opacity: 0; } }
     @keyframes fallaway {
       0% { opacity: 1; transform: translateY(-8vh) scale(1); }
       100% { opacity: 0; transform: translateY(28vh) scale(0.34); }
     }
+    @media (max-width: 600px) { #hud-root { width: calc(100% - 24px); top: 12px; } .hud-card { min-width: 118px; padding: 10px 12px; } .run-feedback { top: 72px; } .overlay-panel { padding: 24px; } }
+    @media (prefers-reduced-motion: reduce) { #game-root.is-crashed #game-canvas, #game-root.is-crashed::after, .fall-callout { animation: none; } .primary-action { transition: none; } }
   `;
   document.head.append(style);
 };
@@ -244,6 +256,9 @@ const createAudioController = () => {
       lastCarveAt = now;
       tone(90 + force * 70, 0.11, "sawtooth", 0.022);
     },
+    clear(kind) {
+      tone(kind === "jump" ? 590 : 470, 0.085, "triangle", 0.026);
+    },
     crash() {
       tone(82, 0.24, "sawtooth", 0.07);
     },
@@ -269,12 +284,17 @@ const createHud = (root) => {
       <span class="hud-label">Best</span>
       <strong class="hud-value" data-best>0 m</strong>
     </div>
+    <div class="run-feedback" data-feedback aria-live="polite"></div>
   `;
 
   return Object.freeze({
-    update({ best, distance }) {
+    update({ best, distance, feedbackText, feedbackTimer }) {
       root.querySelector("[data-distance]").textContent = `${Math.floor(distance)} m`;
       root.querySelector("[data-best]").textContent = `${Math.floor(best)} m`;
+      const feedback = root.querySelector("[data-feedback]");
+      const visible = feedbackTimer > 0;
+      feedback.textContent = visible ? feedbackText : "";
+      feedback.classList.toggle("is-visible", visible);
     },
   });
 };
@@ -311,27 +331,40 @@ const spawnHazard = (state) => {
     };
   }
 
+  const lanes = [-0.66, -0.34, 0, 0.34, 0.66];
+  const candidates = lanes.map((_, index) => index).filter((index) => index !== state.lastLane);
+  const lane = candidates[Math.floor(Math.random() * candidates.length)];
+  state.lastLane = lane;
   return {
     id: state.nextHazardId,
     kind,
     passed: false,
     variant: Math.random() > 0.38 ? "pine" : "rock",
-    x: randomBetween(-COURSE.halfWidth * 0.76, COURSE.halfWidth * 0.76),
+    x: lanes[lane] * COURSE.halfWidth + randomBetween(-0.18, 0.18),
     z: COURSE.spawnDistance,
   };
 };
 
-const nextSpawnDistance = (speed) =>
-  randomBetween(clamp(24 - speed * 0.35, 10, 18), clamp(36 - speed * 0.42, 16, 28));
+const nextSpawnDistance = (speed, kind) => {
+  const actionSpacing = kind === "steer" ? 1 : 1.28;
+  return randomBetween(
+    clamp(29 - speed * 0.28, 16, 25),
+    clamp(42 - speed * 0.36, 24, 36),
+  ) * actionSpacing;
+};
 
 const emptyRunState = (best) => ({
   best,
   celebratedBest: false,
+  crashFx: 0,
   distance: 0,
   dodged: 0,
   fallTimer: 0,
+  feedbackText: "",
+  feedbackTimer: 0,
   finalDistance: 0,
   hazards: [],
+  lastLane: -1,
   nextHazardId: 1,
   phase: "idle",
   rewardTimer: 0,
@@ -359,6 +392,8 @@ export default async function setupGameLoop(game) {
     game.events.dispatchEvent(
       new CustomEvent("course:update", {
         detail: Object.freeze({
+          crashFx: state.crashFx,
+          distance: state.distance,
           hazards: Object.freeze(state.hazards.map((hazard) => Object.freeze({ ...hazard }))),
           phase: state.phase,
           rewardTimer: state.rewardTimer,
@@ -370,10 +405,11 @@ export default async function setupGameLoop(game) {
   const showIdle = () => {
     game.overlayRoot.innerHTML = `
       <div class="overlay-panel">
+        <p class="overlay-eyebrow">The mountain is calling</p>
         <h1>Slopestyle</h1>
-        <p>Carve down the mountain, jump fallen logs, duck overhead hazards, and survive as long as you can.</p>
+        <p>Find your line through deep powder. Dodge trees and rocks, jump logs, and duck low hazards.</p>
         <button class="primary-action" type="button" data-start>Start</button>
-        <p class="run-note">A/D carve. Left/Right flick or hold to skid. Down crouches; Down plus an arrow butters. W/S press the nose/tail. Space or Up jumps.</p>
+        <p class="run-note">A/D or ←/→ steer &nbsp;·&nbsp; Space or ↑ jump &nbsp;·&nbsp; ↓ duck</p>
       </div>
     `;
     game.overlayRoot.querySelector("[data-start]").addEventListener("click", startRun, {
@@ -384,8 +420,9 @@ export default async function setupGameLoop(game) {
   const showCrash = () => {
     game.overlayRoot.innerHTML = `
       <div class="overlay-panel">
+        <p class="overlay-eyebrow">Run complete</p>
         <h1>${Math.floor(state.finalDistance)} m</h1>
-        <p>Final distance</p>
+        <p>Final distance · ${state.dodged} obstacles cleared</p>
         <button class="primary-action" type="button" data-return>Return to top</button>
       </div>
     `;
@@ -410,6 +447,7 @@ export default async function setupGameLoop(game) {
     };
     lastFrameAt = undefined;
     lastJumpValue = 0;
+    game.canvas.parentElement?.classList.remove("is-crashed");
     game.overlayRoot.innerHTML = "";
     game.events.dispatchEvent(
       new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
@@ -422,6 +460,7 @@ export default async function setupGameLoop(game) {
     state = emptyRunState(state.best);
     lastFrameAt = undefined;
     lastJumpValue = 0;
+    game.canvas.parentElement?.classList.remove("is-crashed");
     game.events.dispatchEvent(
       new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
     );
@@ -432,9 +471,11 @@ export default async function setupGameLoop(game) {
 
   const endRun = (reason) => {
     state.finalDistance = state.distance;
+    state.crashFx = 0.8;
     state.best = Math.max(state.best, Math.floor(state.distance));
     setStoredBest(state.best);
     audio.stopTheme();
+    game.canvas.parentElement?.classList.add("is-crashed");
 
     if (reason === "cliff") {
       state.phase = "falling";
@@ -449,17 +490,30 @@ export default async function setupGameLoop(game) {
     showCrash();
   };
 
-  const recordDodge = () => {
+  const recordDodge = (hazard) => {
     state.dodged += 1;
+    if (hazard.kind === "jump" || hazard.kind === "duck") {
+      state.feedbackText = hazard.kind === "jump" ? "Clean jump" : "Nice duck";
+      state.feedbackTimer = 0.85;
+      audio.clear(hazard.kind);
+    }
 
     if (state.dodged % REWARD_EVERY === 0) {
       state.speed = Math.max(START_SPEED, state.speed - REWARD_DROP);
       state.rewardTimer = REWARD_DURATION;
+      state.feedbackText = "10 cleared · breathe";
+      state.feedbackTimer = 1.3;
+      game.events.dispatchEvent(new CustomEvent("rider:pace", {
+        detail: { holdSeconds: REWARD_DURATION, targetSpeed: state.speed },
+      }));
       return;
     }
 
     if (state.rewardTimer <= 0) {
       state.speed = Math.min(MAX_SPEED, state.speed + SPEED_PER_DODGE);
+      game.events.dispatchEvent(new CustomEvent("rider:pace", {
+        detail: { targetSpeed: state.speed },
+      }));
     }
   };
 
@@ -512,9 +566,10 @@ export default async function setupGameLoop(game) {
     }
 
     if (state.spawnLeft <= 0) {
-      state.hazards.push(spawnHazard(state));
+      const hazard = spawnHazard(state);
+      state.hazards.push(hazard);
       state.nextHazardId += 1;
-      state.spawnLeft = nextSpawnDistance(state.speed);
+      state.spawnLeft = nextSpawnDistance(state.speed, hazard.kind);
     }
 
     for (const hazard of state.hazards) {
@@ -527,7 +582,7 @@ export default async function setupGameLoop(game) {
 
       if (!hazard.passed && hazard.z < -HIT_WINDOW) {
         hazard.passed = true;
-        recordDodge();
+        recordDodge(hazard);
       }
     }
 
@@ -550,6 +605,8 @@ export default async function setupGameLoop(game) {
       lastFrameAt === undefined ? 0 : clamp((now - lastFrameAt) / 1_000, 0, 0.05);
 
     lastFrameAt = now;
+    state.crashFx = Math.max(0, state.crashFx - delta);
+    state.feedbackTimer = Math.max(0, state.feedbackTimer - delta);
 
     if (state.phase === "running") {
       updateRunning(event.detail, delta);
