@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   courseSpeedForRider,
   hazardHitsRider,
+  riderOutsideCourse,
   syncHazardsToRider,
 } from "../src/game-loop/index.js";
 
@@ -24,6 +25,12 @@ test("a crashed rider can still come to a stop", () => {
   };
 
   assert.equal(courseSpeedForRider(uphillRider), 0);
+});
+
+test("crossing either marked course edge ends the run before the scenery trees", () => {
+  assert.equal(riderOutsideCourse({ position: { across: 9.5 } }), false);
+  assert.equal(riderOutsideCourse({ position: { across: 9.6 } }), true);
+  assert.equal(riderOutsideCourse({ position: { across: -9.6 } }), true);
 });
 
 test("hazards move with actual downhill progress, not score speed", () => {
