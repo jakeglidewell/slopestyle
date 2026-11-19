@@ -285,7 +285,7 @@ export function createMountainWorld(canvas) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.03;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
   canvas.dataset.renderMode = "webgl";
   terrainMaterial.map = makeSnowTexture();

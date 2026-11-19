@@ -7,6 +7,10 @@ const STORAGE_KEY = "slopestyle.bestDistance";
 const START_SPEED = 16;
 const MIN_COURSE_SPEED = 12;
 const MAX_SPEED = 34;
+const SPEED_PER_DODGE = 0.62;
+const REWARD_EVERY = 10;
+const REWARD_DROP = 3.2;
+const REWARD_DURATION = 2.4;
 const HIT_WINDOW = 1.25;
 
 const clamp = (value, minimum, maximum) =>
@@ -79,6 +83,7 @@ const addInterfaceStyles = () => {
     .hud-card:nth-child(2) { border-bottom: 3px solid #f3c579; text-align: right; }
     .hud-label { display: block; color: #b8e3e9; font-size: clamp(0.7rem, 1.2vw, 0.82rem); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
     .hud-value { display: block; margin-top: 3px; font-size: clamp(1.55rem, 3vw, 2.45rem); font-weight: 900; letter-spacing: -0.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .hud-unit { margin-left: 3px; font-size: 0.45em; font-weight: 700; letter-spacing: 0; }
     .run-feedback { position: absolute; left: 50%; top: 88px; transform: translateX(-50%); min-width: 170px; border-radius: 999px; padding: 8px 16px; background: rgba(23, 67, 77, 0.82); color: #fff; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.12em; text-align: center; text-transform: uppercase; opacity: 0; transition: opacity 0.14s ease; white-space: nowrap; }
     .run-feedback.is-visible { opacity: 1; }
     #overlay-root { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: none; }
@@ -237,7 +242,7 @@ const createAudioController = () => {
       snowBurst(0.09, 1200, 0.015);
     },
     clear(kind) {
-      tone(kind === "jump" ? 590 : 470, 0.085, "triangle", 0.026);
+      snowBurst(0.11, kind === "jump" ? 950 : 700, 0.025);
     },
     crash() {
       snowBurst(0.32, 220, 0.09);
@@ -262,9 +267,10 @@ const createHud = (root) => {
   `;
 
   return Object.freeze({
-    update({ best, distance, feedbackText, feedbackTimer }) {
+    update({ distance, speed, feedbackText, feedbackTimer }) {
       root.querySelector("[data-distance]").textContent = `${Math.floor(distance)} m`;
-      root.querySelector("[data-best]").textContent = `${Math.floor(best)} m`;
+      root.querySelector("[data-speed]").innerHTML =
+        `${Math.round(speed * 3.6)}<span class="hud-unit">km/h</span>`;
       const feedback = root.querySelector("[data-feedback]");
       const visible = feedbackTimer > 0;
       feedback.textContent = visible ? feedbackText : "";
@@ -319,6 +325,7 @@ const spawnHazard = (state, riderDownhill) => {
     kind,
     passed: false,
     variant: Math.random() > 0.38 ? "pine" : "rock",
+    worldDownhill,
     x: lanes[lane] * COURSE.halfWidth + randomBetween(-0.18, 0.18),
     z: COURSE.spawnDistance,
   };
@@ -344,10 +351,12 @@ const emptyRunState = (best) => ({
   finalDistance: 0,
   hazards: [],
   lastLane: -1,
+  lastRiderDownhill: 0,
   nextHazardId: 1,
   phase: "idle",
+  rewardTimer: 0,
   spawnLeft: 12,
-  speed: START_SPEED,
+  speed: 0,
 });
 
 export default async function setupGameLoop(game) {
@@ -374,6 +383,7 @@ export default async function setupGameLoop(game) {
           distance: state.distance,
           hazards: Object.freeze(state.hazards.map((hazard) => Object.freeze({ ...hazard }))),
           phase: state.phase,
+          rewardTimer: state.rewardTimer,
         }),
       }),
     );
@@ -386,7 +396,7 @@ export default async function setupGameLoop(game) {
         <h1>Slopestyle</h1>
         <p>Find your line through deep powder. Dodge trees and rocks, jump logs, and duck low hazards.</p>
         <button class="primary-action" type="button" data-start>Start</button>
-        <p class="run-note">A/D or ←/→ steer &nbsp;·&nbsp; Space or ↑ jump &nbsp;·&nbsp; ↓ duck</p>
+        <p class="run-note">A/D carve &nbsp;·&nbsp; ←/→ steer &nbsp;·&nbsp; Space or ↑ jump &nbsp;·&nbsp; ↓ crouch &nbsp;·&nbsp; W/S shift weight</p>
       </div>
     `;
     game.overlayRoot.querySelector("[data-start]").addEventListener("click", startRun, {
@@ -400,7 +410,7 @@ export default async function setupGameLoop(game) {
         <p class="overlay-eyebrow">Run complete</p>
         <h1>${Math.floor(state.finalDistance)} m</h1>
         <p>Final distance · ${state.dodged} obstacles cleared</p>
-        <button class="primary-action" type="button" data-return>Return to top</button>
+        <button class="primary-action" type="button" data-restart>Ride again</button>
       </div>
     `;
     game.overlayRoot.querySelector("[data-restart]").addEventListener("click", startRun, {
@@ -421,6 +431,7 @@ export default async function setupGameLoop(game) {
       ...emptyRunState(state.best),
       phase: "running",
       spawnLeft: 4,
+      speed: START_SPEED,
     };
     lastFrameAt = undefined;
     lastJumpValue = 0;
@@ -430,20 +441,7 @@ export default async function setupGameLoop(game) {
       new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
     );
     dispatchCourse();
-    audio.startTheme();
-  };
-
-  const returnToTop = () => {
-    state = emptyRunState(state.best);
-    lastFrameAt = undefined;
-    lastJumpValue = 0;
-    game.canvas.parentElement?.classList.remove("is-crashed");
-    game.events.dispatchEvent(
-      new CustomEvent("rider:reset", { detail: { speed: START_SPEED } }),
-    );
-    dispatchCourse();
-    hud.update(state);
-    showIdle();
+    audio.startRide();
   };
 
   const endRun = (reason, hazard) => {
@@ -451,7 +449,7 @@ export default async function setupGameLoop(game) {
     state.crashFx = 0.8;
     state.best = Math.max(state.best, Math.floor(state.distance));
     setStoredBest(state.best);
-    audio.stopTheme();
+    audio.stopRide();
     game.canvas.parentElement?.classList.add("is-crashed");
 
     if (reason === "cliff") {
@@ -538,9 +536,10 @@ export default async function setupGameLoop(game) {
     state.speed = riderState.speed;
     state.distance += courseSpeed * delta;
     state.spawnLeft -= downhillProgress;
+    state.rewardTimer = Math.max(0, state.rewardTimer - delta);
 
     if (state.spawnLeft <= 0) {
-      const hazard = spawnHazard(state);
+      const hazard = spawnHazard(state, riderDownhill);
       state.hazards.push(hazard);
       state.nextHazardId += 1;
       state.spawnLeft = nextSpawnDistance(state.speed, hazard.kind);
