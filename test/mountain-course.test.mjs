@@ -61,6 +61,85 @@ test("projection aligns hazards with the rider and shows the cliff edge", () => 
   assert.ok(far.y < near.y);
 });
 
+test("the visible piste bends ahead while its near edge stays aligned", () => {
+  const canvas = { width: 1200, height: 800 };
+  const options = { halfWidth: 9.5, travel: 36 };
+  const near = projectCoursePoint(canvas, 0, { x: 0, z: 0 }, options);
+  const ahead = projectCoursePoint(canvas, 0, { x: 0, z: 24 }, options);
+  const aheadEdge = projectCoursePoint(canvas, 0, { x: 9.5, z: 24 }, options);
+  const later = projectCoursePoint(canvas, 0, { x: 0, z: 24 }, { ...options, travel: 80 });
+
+  assert.equal(near.x, canvas.width / 2);
+  assert.ok(Math.abs(ahead.x - near.x) > 5);
+  assert.ok(Math.abs(ahead.x - later.x) > 5);
+  assert.ok(Math.abs(aheadEdge.x - ahead.x - ahead.pathHalf) < 0.001);
+});
+
+test("rolling terrain changes the projected slope height without moving the rider contact point", () => {
+  const canvas = { width: 1200, height: 800 };
+  const near = projectCoursePoint(canvas, 0, { x: 0, z: 0 }, { travel: 31 });
+  const firstRoll = projectCoursePoint(canvas, 0, { x: 0, z: 18 }, { travel: 0 });
+  const laterRoll = projectCoursePoint(canvas, 0, { x: 0, z: 18 }, { travel: 31 });
+
+  assert.equal(near.y, canvas.height * 0.78);
+  assert.ok(Math.abs(firstRoll.y - laterRoll.y) > 2);
+});
+
+test("an obstacle at the rider's position lines up with camera lag", () => {
+  const canvas = { width: 1200, height: 800 };
+  const riderAcross = 4;
+  const cameraAcross = 2;
+  const zoom = 0.9;
+  const viewAcross = courseViewAcross(canvas, riderAcross, cameraAcross, zoom, 9.5);
+  const obstacle = projectCoursePoint(canvas, viewAcross, { x: riderAcross, z: 0 });
+  const riderScreenX = canvas.width / 2 + (riderAcross - cameraAcross) * 14 * zoom;
+
+  assert.ok(Math.abs(obstacle.x - riderScreenX) < 0.001);
+});
+
+test("powder spray appears on a slash, follows the rider, and stops off powder", async () => {
+  let sprayMarks = 0;
+  const sprayXs = [];
+  const context = new Proxy({
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+    ellipse: (x) => {
+      if (context.fillStyle === "rgba(255,255,255,0.96)") {
+        sprayMarks += 1;
+        sprayXs.push(x);
+      }
+    },
+  }, { get(target, key) { return target[key] ?? (() => {}); } });
+  const game = {
+    canvas: { width: 850, height: 600, getContext: () => context },
+    events: new EventTarget(),
+  };
+  await setupMountain(game);
+  const send = (type, detail) => {
+    const event = new Event(type);
+    event.detail = detail;
+    game.events.dispatchEvent(event);
+  };
+  send("course:update", { phase: "running", hazards: [] });
+  const state = { position: { across: 0, downhill: 1 }, air: 0, speed: 20 };
+  send("rider:update", { state: { ...state, skid: 0, slash: 0 } });
+  const glidingMarks = sprayMarks;
+  send("rider:update", { state: { ...state, skid: 0.7, slash: 1, slipAngle: 0.6 } });
+  const powderMarks = sprayMarks;
+  const originalSprayX = sprayXs[0];
+  send("rider:update", { state: { ...state, surface: "ice", skid: 0.7, slash: 1 } });
+  const iceMarks = sprayMarks;
+  send("rider:update", {
+    state: { ...state, position: { across: 4, downhill: 1 }, skid: 0.7, slash: 1, slipAngle: 0.6 },
+    camera: { position: { across: 0 }, zoom: 1 },
+  });
+
+  assert.equal(glidingMarks, 0);
+  assert.ok(powderMarks > glidingMarks);
+  assert.equal(iceMarks, powderMarks);
+  assert.ok(sprayXs[powderMarks] > originalSprayX + 30);
+});
+
 test("course bends ahead while the contact point stays under the rider", () => {
   const canvas = { width: 1600, height: 900 };
   for (const travel of [0, 90, 210]) {

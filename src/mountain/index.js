@@ -2,6 +2,7 @@ import {
   biomeAt,
   CHUNK_LENGTH,
   courseBendAt,
+  courseViewAcross,
   HORIZON_Y,
   projectCoursePoint,
   RIDER_Y,
@@ -335,12 +336,12 @@ const drawPowderTrail = (context, canvas, riderAcross, travel, samples) => {
   context.globalAlpha = 1;
 };
 
-const drawSnowSpray = (context, canvas, carve, travel, landingImpact = 0, speed = 16) => {
+export const drawSnowSpray = (context, canvas, carve, travel, landingImpact = 0, speed = 16, centerX = canvas.width / 2) => {
   const unit = screenUnit(canvas);
-  const centerX = canvas.width / 2;
   const baseY = canvas.height * RIDER_Y;
   const force = clamp(Math.abs(carve), 0, 1);
   const landing = clamp(landingImpact / 8, 0, 1);
+  if (force < 0.05 && landing < 0.08) return;
   const speedFactor = clamp(speed / 24, 0.75, 1.5);
 
   for (const side of [-1, 1]) {
@@ -828,7 +829,12 @@ export default async function setupMountain(game) {
     const riderState = event.detail?.state;
     const camera = event.detail?.camera;
     const riderAcross = Number(riderState?.position?.across) || 0;
-    const sceneTravel = course.phase === "idle" ? 0 : course.distance;
+    const cameraAcross = Number(camera?.position?.across) || 0;
+    const zoom = clamp(Number(camera?.zoom) || 1, 0.82, 1);
+    const viewAcross = courseViewAcross(game.canvas, riderAcross, cameraAcross, zoom, COURSE.halfWidth);
+    const sceneTravel = course.phase === "idle"
+      ? 0
+      : Number(riderState?.position?.downhill) || course.distance;
     if (course.phase === "idle") {
       travel = 0;
       trail = [];
@@ -845,26 +851,35 @@ export default async function setupMountain(game) {
     context.translate(game.canvas.width / 2, game.canvas.height / 2);
     context.rotate(-(Number(camera?.roll) || 0));
     context.translate(-game.canvas.width / 2, -game.canvas.height / 2);
-    drawBackground(context, game.canvas, riderAcross, sceneTravel);
+    drawBackground(context, game.canvas, viewAcross, sceneTravel);
     drawSnowTexture(
       context,
       game.canvas,
-      riderAcross,
+      viewAcross,
       sceneTravel,
       riderState?.surface ?? "powder",
       Number(riderState?.speed) || 0,
     );
-    drawSideRidges(context, game.canvas, riderAcross, sceneTravel);
-    drawPowderTrail(context, game.canvas, riderAcross, travel, trail);
+    drawSideRidges(context, game.canvas, viewAcross, sceneTravel);
+    drawPowderTrail(context, game.canvas, viewAcross, travel, trail);
     if (course.phase === "running" && (riderState?.air ?? 0) < 0.08) {
-      drawSnowSpray(
-        context, game.canvas, Number(event.detail?.input?.carve) || 0,
-        travel, Number(riderState?.landingImpact) || 0, Number(riderState?.speed) || 16,
+      const spray = riderState?.surface === "ice" ? 0 : clamp(
+        (Number(riderState?.slash) || 0) * 0.85 +
+        (Number(riderState?.skid) || 0) * 0.5 +
+        (Number(riderState?.washout) || 0) * 0.35,
+        0, 1,
       );
+      const direction = Math.sign(riderState?.slipAngle || riderState?.edge || event.detail?.input?.carve || 1);
+      const riderX = game.canvas.width / 2 + (riderAcross - cameraAcross) * 14 * zoom;
+      if (riderState?.surface !== "ice") {
+        drawSnowSpray(context, game.canvas, direction * spray, travel,
+          Number(riderState?.landingImpact) || 0, Number(riderState?.speed) || 16, riderX);
+      }
     }
-    drawWind(context, game.canvas, riderAcross, sceneTravel, Number(riderState?.speed) || 0);
-    drawSideScenery(context, game.canvas, riderAcross, sceneTravel);
-    drawHazards(context, game.canvas, riderAcross, sceneTravel, course.hazards);
+    drawWind(context, game.canvas, viewAcross, sceneTravel, Number(riderState?.speed) || 0);
+    drawSideScenery(context, game.canvas, viewAcross, sceneTravel);
+    drawPisteMarkers(context, game.canvas, viewAcross, sceneTravel);
+    drawHazards(context, game.canvas, viewAcross, sceneTravel, course.hazards);
     drawCrashBurst(context, game.canvas, course.crashFx);
     context.restore();
   });
