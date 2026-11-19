@@ -5,6 +5,7 @@ import setupMountain from "../src/mountain/index.js";
 
 test("the mountain renders a running course with every hazard type", async () => {
   let drawings = 0;
+  const rotations = [];
   const noop = () => {};
   const context = {
     arc: noop,
@@ -20,7 +21,7 @@ test("the mountain renders a running course with every hazard type", async () =>
     moveTo: noop,
     quadraticCurveTo: noop,
     restore: noop,
-    rotate: noop,
+    rotate: (angle) => { rotations.push(angle); },
     save: noop,
     stroke: () => { drawings += 1; },
     strokeRect: () => { drawings += 1; },
@@ -33,6 +34,7 @@ test("the mountain renders a running course with every hazard type", async () =>
   await setupMountain(game);
   const hazards = [
     { kind: "steer", variant: "rock", x: -3, z: 8 },
+    { kind: "steer", variant: "rolling-boulder", x: 1, z: 11, radius: 1.15, roll: 0.83 },
     { kind: "steer", variant: "pine", x: 4, z: 15 },
     { kind: "jump", x: 0, z: 25 },
     { kind: "duck", variant: "bird", x: 0, z: 34 },
@@ -57,4 +59,5 @@ test("the mountain renders a running course with every hazard type", async () =>
     }));
   }
   assert.ok(drawings > 250);
+  assert.ok(rotations.includes(0.83));
 });

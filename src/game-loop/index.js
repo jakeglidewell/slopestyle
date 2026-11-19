@@ -8,6 +8,7 @@ const START_SPEED = 16;
 const MIN_COURSE_SPEED = 12;
 const MAX_SPEED = 34;
 const HIT_WINDOW = 1.25;
+const BOULDER_RADIUS = 1.15;
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -22,11 +23,19 @@ export const courseSpeedForRider = (riderState) => {
     : Math.max(MIN_COURSE_SPEED, downhillSpeed);
 };
 
-export const syncHazardsToRider = (hazards, riderDownhill) =>
-  hazards.map((hazard) => ({
-    ...hazard,
-    z: hazard.worldDownhill - riderDownhill,
-  }));
+export const syncHazardsToRider = (hazards, riderDownhill, delta = 0) =>
+  hazards.map((hazard) => {
+    const z = hazard.worldDownhill - riderDownhill;
+    if (hazard.variant !== "rolling-boulder") return { ...hazard, z };
+
+    const lateralTravel = hazard.acrossSpeed * delta;
+    return {
+      ...hazard,
+      x: hazard.x + lateralTravel,
+      z,
+      roll: hazard.roll + lateralTravel / hazard.radius,
+    };
+  });
 
 export const hazardHitsRider = (hazard, riderState, input = {}) => {
   if (hazard.passed || Math.abs(hazard.z) > HIT_WINDOW) return false;
@@ -40,6 +49,9 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
     const halfSpan = hazard.variant === "bird" ? 0.86 : 0.88;
     return lateralGap < (hazard.radius ?? COURSE.halfWidth * halfSpan) &&
       (Number(input.crouch) || 0) < 0.75;
+  }
+  if (hazard.variant === "rolling-boulder") {
+    return air < hazard.radius * 1.85 && lateralGap < hazard.radius;
   }
   return air < 0.35 && lateralGap < 1.05;
 };
@@ -259,10 +271,31 @@ const createHud = (root) => {
   });
 };
 
-const spawnHazard = (state, riderDownhill) => {
+const spawnHazard = (state, riderDownhill, courseSpeed) => {
+  const worldDownhill = riderDownhill + COURSE.spawnDistance;
+  if (state.nextHazardId === state.nextBoulderId) {
+    state.nextBoulderId += 5 + Math.floor(Math.random() * 3);
+    const direction = Math.random() < 0.5 ? 1 : -1;
+    const x = -direction * COURSE.halfWidth * 0.86;
+    const crossingX = direction * randomBetween(0.15, 1.5);
+    // Time the crossing near the center of the run at the rider's current pace.
+    const acrossSpeed = (crossingX - x) * courseSpeed / COURSE.spawnDistance;
+    return {
+      id: state.nextHazardId,
+      kind: "steer",
+      passed: false,
+      variant: "rolling-boulder",
+      radius: BOULDER_RADIUS,
+      acrossSpeed,
+      roll: 0,
+      worldDownhill,
+      x,
+      z: COURSE.spawnDistance,
+    };
+  }
+
   const actionRoll = Math.random();
   let kind = "steer";
-  const worldDownhill = riderDownhill + COURSE.spawnDistance;
 
   if (state.dodged > 4 && actionRoll > 0.82) {
     kind = "duck";
@@ -325,6 +358,7 @@ const emptyRunState = (best) => ({
   hazards: [],
   lastLane: -1,
   lastRiderDownhill: 0,
+  nextBoulderId: 4 + Math.floor(Math.random() * 3),
   nextHazardId: 1,
   phase: "idle",
   spawnLeft: 12,
@@ -465,13 +499,13 @@ export default async function setupGameLoop(game) {
     state.distance += courseSpeed * delta;
     state.spawnLeft -= downhillProgress;
 
+    state.hazards = syncHazardsToRider(state.hazards, riderDownhill, delta);
     if (state.spawnLeft <= 0) {
-      state.hazards.push(spawnHazard(state, riderDownhill));
+      state.hazards.push(spawnHazard(state, riderDownhill, courseSpeed));
       state.nextHazardId += 1;
       state.spawnLeft = nextSpawnDistance(state.speed);
     }
 
-    state.hazards = syncHazardsToRider(state.hazards, riderDownhill);
     for (const hazard of state.hazards) {
       if (hazardHitsRider(hazard, riderState, input)) {
         endRun("hazard", hazard);
