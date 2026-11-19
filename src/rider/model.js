@@ -70,6 +70,7 @@ export function buildLowPolyRider(pose = {}) {
   const tailLift = Math.max(0, -press) * 18;
   const handDrag = clamp(finiteOr(pose.handDrag), 0, 1);
   const grab = clamp(finiteOr(pose.grab), 0, 1);
+  const scarfFlutter = clamp(finiteOr(pose.scarfFlutter), -1, 1);
   const bob = finiteOr(pose.bob) * 20;
   const boardBob = finiteOr(pose.boardBob, finiteOr(pose.bob)) * 20;
   const kneeBob = bob * 0.42 + boardBob * 0.58;
@@ -134,6 +135,20 @@ export function buildLowPolyRider(pose = {}) {
         point(-5 + boardShear * 0.4, -39 + boardBob),
       ],
     ),
+    polygon("board-stripe", "boardAccent", [
+      point(boardShear * 0.65, -41 + boardBob),
+      point(3 + boardShear * 0.35, -35 + boardBob),
+      point(3 - boardShear * 0.2, 40 + boardBob),
+      point(-3 - boardShear * 0.2, 40 + boardBob),
+      point(-3 + boardShear * 0.35, -35 + boardBob),
+    ]),
+    ...(airborne > 0.12 ? [polygon("board-underside", "boardUnderside", [
+      point(11 + boardShear * 0.72, -48 + boardBob),
+      point(16 + boardShear * 0.6, -43 + boardBob),
+      point(18 - boardShear * 0.65, 46 + boardBob),
+      point(7 - boardShear, 58 + boardBob),
+      point(13 - boardShear * 0.65, 44 + boardBob),
+    ])] : []),
     polygon(
       "left-boot",
       "boots",
@@ -177,6 +192,12 @@ export function buildLowPolyRider(pose = {}) {
       point(hipCenter.x, hipCenter.y + 13),
       point(leftHip.x - 4, leftHip.y + 8),
     ]),
+    polygon("jacket-stripe", "jacketAccent", [
+      point(leftShoulder.x + 4, leftShoulder.y + 4),
+      point(rightShoulder.x - 4, rightShoulder.y + 1),
+      point(rightShoulder.x - 4, rightShoulder.y + 7),
+      point(leftShoulder.x + 4, leftShoulder.y + 10),
+    ]),
     polygon("left-arm", "jacketShadow", segment(leftShoulder, leftHand, 8)),
     polygon("right-arm", "jacket", segment(rightShoulder, rightHand, 8)),
     polygon("left-mitt", "mitts", rotatedRectangle(leftHand.x, leftHand.y, 8, 10, -0.18)),
@@ -195,6 +216,25 @@ export function buildLowPolyRider(pose = {}) {
       point(headCenter.x + 7, headCenter.y - 4),
       point(headCenter.x + 3, headCenter.y),
       point(headCenter.x - 5, headCenter.y),
+    ]),
+    polygon("goggle-strap", "goggleStrap", [
+      point(headCenter.x - 9, headCenter.y - 1),
+      point(headCenter.x + 9, headCenter.y - 1),
+      point(headCenter.x + 8, headCenter.y + 3),
+      point(headCenter.x - 8, headCenter.y + 3),
+    ]),
+    polygon("goggle-lens", "goggleLens", [
+      point(headCenter.x - 6, headCenter.y - 2),
+      point(headCenter.x + 7, headCenter.y - 2),
+      point(headCenter.x + 5, headCenter.y + 2),
+      point(headCenter.x - 5, headCenter.y + 2),
+    ]),
+    polygon("scarf", "scarf", [
+      point(shoulderCenter.x + 7, shoulderCenter.y - 10),
+      point(shoulderCenter.x + 15, shoulderCenter.y - 8),
+      point(shoulderCenter.x + 21 + lean * 4 + scarfFlutter * 5,
+        shoulderCenter.y + 10 - airborne * 5 - Math.abs(scarfFlutter) * 4),
+      point(shoulderCenter.x + 11, shoulderCenter.y + 2),
     ]),
   ]);
 }

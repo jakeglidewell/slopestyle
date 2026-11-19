@@ -58,3 +58,14 @@ test("projection aligns hazards with the rider and shows the cliff edge", () => 
   assert.ok(far.scale < near.scale);
   assert.ok(far.y < near.y);
 });
+
+test("course bends ahead while the contact point stays under the rider", () => {
+  const canvas = { width: 1600, height: 900 };
+  for (const travel of [0, 90, 210]) {
+    const contact = projectCoursePoint(canvas, 3.5, { x: 3.5, z: 0 }, { travel });
+    assert.ok(Math.abs(contact.x - canvas.width / 2) < 0.02);
+  }
+  const firstBend = projectCoursePoint(canvas, 0, { x: 0, z: 20 }, { travel: 0 });
+  const nextBend = projectCoursePoint(canvas, 0, { x: 0, z: 20 }, { travel: 90 });
+  assert.notEqual(firstBend.x, nextBend.x);
+});
