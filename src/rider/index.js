@@ -8,6 +8,19 @@ const PHYSICS_STEP = 1 / 120;
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
 
+export const setRiderSpeed = (state, targetSpeed) => {
+  if (!Number.isFinite(targetSpeed) || targetSpeed <= 0 || state.crashed) return state;
+  const currentSpeed = Math.hypot(state.velocity.across, state.velocity.downhill);
+  const ratio = targetSpeed / Math.max(currentSpeed, 0.001);
+  return createRiderState({
+    ...state,
+    velocity: {
+      across: state.velocity.across * ratio,
+      downhill: state.velocity.downhill * ratio,
+    },
+  });
+};
+
 /**
  * Owner 1 entry point: controls, physics, camera, animation, crash, and respawn.
  */
@@ -23,6 +36,9 @@ export default async function setupRider(game) {
   let externalInput = Object.freeze({ carve: 0, crouch: 0, press: 0, steer: 0, stretch: 0 });
   let queuedExternalJump = false;
   let pendingJump = 0;
+  let pendingPace;
+  let paceHold = 0;
+  let paceTarget = 0;
   let physicsRemainder = 0;
   let previousTimestamp;
   let state = createRiderState({ surface: environment.surface });
@@ -47,6 +63,14 @@ export default async function setupRider(game) {
     });
   });
 
+  game.events.addEventListener("rider:pace", (event) => {
+    if (!Number.isFinite(event.detail?.targetSpeed)) return;
+    pendingPace = {
+      holdSeconds: Math.max(0, Number(event.detail?.holdSeconds) || 0),
+      targetSpeed: clamp(event.detail.targetSpeed, 12, 34),
+    };
+  });
+
   game.events.addEventListener("rider:stance", (event) => {
     stance = event.detail?.stance === "goofy" ? "goofy" : "regular";
     state = createRiderState({ ...state, stance });
@@ -58,6 +82,9 @@ export default async function setupRider(game) {
     previousTimestamp = undefined;
     queuedExternalJump = false;
     pendingJump = 0;
+    pendingPace = undefined;
+    paceHold = 0;
+    paceTarget = 0;
     physicsRemainder = 0;
     state = createRiderState({
       speed: Number(event.detail?.speed) || 16,
@@ -88,6 +115,12 @@ export default async function setupRider(game) {
       : clamp((timestamp - previousTimestamp) / 1_000, 0, 0.1);
 
     previousTimestamp = timestamp;
+    if (pendingPace && state.air <= 0.08) {
+      state = setRiderSpeed(state, pendingPace.targetSpeed);
+      paceTarget = pendingPace.targetSpeed;
+      paceHold = pendingPace.holdSeconds;
+      pendingPace = undefined;
+    }
     const wasCrashed = state.crashed;
     pendingJump = Math.max(pendingJump, input.jump);
     physicsRemainder += deltaSeconds;
@@ -100,6 +133,10 @@ export default async function setupRider(game) {
         PHYSICS_STEP,
         environment,
       );
+      if (paceHold > 0 && state.speed > paceTarget) {
+        state = setRiderSpeed(state, paceTarget);
+      }
+      paceHold = Math.max(0, paceHold - PHYSICS_STEP);
       pendingJump = 0;
       physicsRemainder -= PHYSICS_STEP;
     }

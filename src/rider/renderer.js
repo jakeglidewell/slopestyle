@@ -1,41 +1,29 @@
 import { buildLowPolyRider } from "./model.js";
 
 export const PROTOTYPE_RIDER_PALETTE = Object.freeze({
-  board: "#f16e50",
-  boardAccent: "#f4e9d8",
-  boardBase: "#a8453f",
-  boardEdge: "#f8fafc",
-  boardSide: "#a94b40",
-  boardShadow: "#29354e",
-  boots: "#202a40",
-  bootsTop: "#46536d",
+  board: "#18364f",
+  boardAccent: "#61e2e8",
+  boardShadow: "#2b6e80",
+  boardUnderside: "#f5a357",
+  boots: "#152536",
   carveTrace: "rgba(71, 125, 148, 0.58)",
   flatTrace: "rgba(116, 174, 194, 0.18)",
-  goggles: "#182438",
-  goggleLens: "#8ed4d9",
-  helmet: "#f16e50",
-  helmetBand: "#29354e",
-  helmetHighlight: "#ff9b78",
-  helmetSide: "#d75b49",
-  helmetShadow: "#b74840",
-  mitts: "#202a40",
-  pantCuff: "#26324b",
-  pants: "#657391",
-  pantsFold: "#35415c",
-  pantsSide: "#3c4967",
-  pantsShadow: "#4c5a78",
+  goggleLens: "#89f0eb",
+  goggleStrap: "#10243a",
+  helmet: "#20354a",
+  helmetShadow: "#10243a",
+  jacket: "#ef7954",
+  jacketAccent: "#ffe3af",
+  jacketShadow: "#bc5147",
+  mitts: "#17283a",
+  pants: "#183c54",
+  pantsShadow: "#10283b",
   powderTrace: "rgba(85, 159, 185, 0.24)",
   pressTrace: "rgba(71, 125, 148, 0.32)",
-  shadow: "rgba(15, 23, 42, 0.22)",
+  scarf: "#f6cd75",
+  shadow: "rgba(15, 42, 58, 0.24)",
   skidTrace: "rgba(116, 174, 194, 0.3)",
-  skin: "#dca67f",
-  sleeve: "#f16e50",
-  sleeveLight: "#ff9d77",
-  sleeveShadow: "#bc4d42",
-  snowSpray: "#b9e9f5",
-  tee: "#f4e9d8",
-  teeLight: "#fff9ec",
-  teeShadow: "#d7c8b9",
+  snowSpray: "#ffffff",
 });
 
 const clamp = (value, minimum, maximum) =>
@@ -291,7 +279,7 @@ export function drawLowPolyRider(context, model, options = {}) {
     }
 
     context.closePath();
-    context.fillStyle = palette[polygon.tone] ?? palette.board;
+    context.fillStyle = palette[polygon.tone] ?? palette.jacket;
     context.fill();
     context.restore();
   }
@@ -308,15 +296,15 @@ export function createRiderRenderer(
   if (!context) {
     throw new Error("Rider rendering requires a 2D canvas context");
   }
-  const snowTrack = createSnowTrackTrail();
-
   return Object.freeze({
     beginFrame() {
       context.clearRect(0, 0, canvas.width, canvas.height);
     },
     draw({ camera, pose, state }) {
       const zoom = clamp(Number(camera.zoom) || 1, 0.82, 1);
-      const viewportScale = clamp(canvas.width / 480, 0.8, 1.6) * zoom;
+      const viewportScale = clamp(
+        Math.min(canvas.width / 700, canvas.height / 500), 1.1, 2.4,
+      ) * zoom;
       const cameraLag =
         (state.position.across - camera.position.across) * 14 * zoom;
       const jumpLift = getJumpLift(canvas, state.air);
@@ -328,34 +316,12 @@ export function createRiderRenderer(
       context.translate(canvas.width / 2, canvas.height / 2);
       context.rotate(-(Number(camera.roll) || 0));
       context.translate(-canvas.width / 2, -canvas.height / 2);
-      snowTrack.update(state);
-      drawSnowTracks(context, snowTrack.points(), {
-        cameraAcross: camera.position.across,
-        currentDownhill: state.position.downhill,
-        groundY,
-        palette,
-        scale: viewportScale,
-        surface: state.surface,
-        viewportCenter: canvas.width / 2,
-      });
-
-      if (pose.handDrag > 0.55) {
-        const dragSide = Math.sign(pose.lean || state.edge || 1);
-        drawCarveTrace(context, {
-          edge: dragSide,
-          palette,
-          quality: pose.handDrag,
-          scale: viewportScale,
-          x: riderX + dragSide * 28 * viewportScale,
-          y: groundY + 5 * viewportScale,
-        });
-      }
-
       drawSnowSpray(context, {
         direction: -Math.sign(state.slipAngle || state.edge || 1),
         intensity: pose.spray,
         palette,
         scale: viewportScale,
+        surface: state.surface,
         x: riderX,
         y: groundY + 4 * viewportScale,
       });
@@ -398,7 +364,7 @@ export function createRiderRenderer(
         rotation:
           (pose.airborne > 0
             ? pose.bodySpin
-            : clamp(normalizeAngle(pose.bodyYaw) * 0.12, -0.4, 0.4)) +
+            : clamp(normalizeAngle(pose.bodyYaw) * 0.12 + pose.lean * 0.08, -0.4, 0.4)) +
           pose.fallRotation,
         scale: viewportScale,
         x: riderX,

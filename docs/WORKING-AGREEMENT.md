@@ -39,3 +39,5 @@ Change a shared file only when the shared contract itself must change, and coord
 | `rider:surface` | Mountain & Content | `{ surface, slopeGrade? }` | Changes snow physics; surface is `groomed`, `ice`, `powder`, `slush`, `chop`, or `rail`; slopeGrade is the downhill angle in radians |
 | `rider:stance` | Game Loop & Polish | `{ stance }` | Selects `regular` or `goofy` stance without changing the control directions |
 | `rider:crash` | Rider Feel | rider state | Announces edge catches, bad landings, and rail slip-outs |
+| `rider:pace` | Game Loop & Polish | `{ targetSpeed: number, holdSeconds?: number }` | Applies a cleared-obstacle speed increase or the brief slowdown reward; the rider keeps its current heading |
+| `course:update` | Game Loop & Polish | `{ hazards, phase, distance, rewardTimer, crashFx }` | Gives the mountain renderer course motion, hazards, and crash feedback for the current run |
