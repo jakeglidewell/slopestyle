@@ -1,3 +1,6 @@
+import { STUMBLE_TIME } from "./landing.js";
+import { LEG_COMPRESS, LEG_REACH } from "./legs.js";
+
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
 
@@ -154,7 +157,6 @@ export function getRiderPose(state, input = {}) {
         apexTuck * 0.18 -
         airOpen * 0.2 -
         jumpStretch * 0.1 +
-        compression * 0.5 +
         bumpImpact * 0.38 +
         gForce * 0.08 +
         flickBite * 0.18,
@@ -193,6 +195,8 @@ export function getRiderPose(state, input = {}) {
       -1.04,
       1.04,
     ),
+    // Real leg travel: the model moves the hips by it over a board that stays put.
+    legOffset: clamp(finiteOr(state.legOffset), -LEG_COMPRESS, LEG_REACH),
     spray: airborne
       ? 0
       : clamp(
@@ -229,6 +233,7 @@ export function getRiderPose(state, input = {}) {
     clothLag: 0,
     stumble: clamp(
       crashCollapse + finiteOr(state.washout) * 0.8 +
+        clamp(finiteOr(state.stumble) / STUMBLE_TIME, 0, 1) * 0.6 +
         Math.max(0, finiteOr(state.landingImpact) - 3) * 0.1 +
         finiteOr(state.bumpImpact) * 0.2 + impactWarning * 0.28,
       0,

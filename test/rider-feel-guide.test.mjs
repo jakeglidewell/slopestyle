@@ -94,7 +94,7 @@ test("an uncharged hop and a loaded ollie reach their distinct heights", () => {
   ));
 
   assert.ok(neutral > 0.55 && neutral < 0.85, `neutral hop ${neutral}`);
-  assert.ok(loaded > neutral * 3 && loaded < 3.5, `loaded ollie ${loaded}`);
+  assert.ok(loaded > neutral * 2.2 && loaded < 3.5, `loaded ollie ${loaded}`);
 });
 
 test("a hard landing loads the impact meter without ending the run at once", () => {

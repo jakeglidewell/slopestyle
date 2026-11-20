@@ -3,11 +3,21 @@ import { createCameraState, stepCamera } from "./camera.js";
 import { createKeyboardControls } from "./controls.js";
 import { crashRiderOnHazard, createRiderState, riderSpeedRangeAt, stepRider } from "./physics.js";
 import { createRiderRenderer } from "./renderer.js";
-import { sideHitLipDistance, snowSurfaceHeight, snowSurfaceNormal } from "../mountain/terrain3d.js";
+import { sideHitLipDistance, snowSurfaceHeight } from "../mountain/terrain3d.js";
 
 const PHYSICS_STEP = 1 / 120;
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
+
+/**
+ * Split one frame into equal physics steps of at most 1/120 s that add up to the
+ * frame's own duration, so the rider moves as far as the picture says it did.
+ */
+export const planPhysicsSteps = (deltaSeconds) => {
+  if (!(deltaSeconds > 0)) return Object.freeze({ count: 0, step: 0 });
+  const count = Math.ceil(deltaSeconds / PHYSICS_STEP - 1e-6);
+  return Object.freeze({ count, step: deltaSeconds / count });
+};
 
 export const setRiderSpeed = (state, targetSpeed) => {
   if (!Number.isFinite(targetSpeed) || targetSpeed <= 0 || state.crashed) return state;
@@ -15,8 +25,15 @@ export const setRiderSpeed = (state, targetSpeed) => {
   const adjustedSpeed = clamp(targetSpeed, limits.min, limits.max);
   const currentSpeed = Math.hypot(state.velocity.across, state.velocity.downhill);
   const ratio = adjustedSpeed / Math.max(currentSpeed, 0.001);
+  // The hill passes under the rider at the new pace; the body keeps whatever
+  // it was doing on its legs.
+  const riding = state.grounded && Number.isFinite(state.hillRate);
   return createRiderState({
     ...state,
+    hillRate: riding ? state.hillRate * ratio : null,
+    worldVerticalVelocity: riding
+      ? state.worldVerticalVelocity + state.hillRate * (ratio - 1)
+      : state.worldVerticalVelocity,
     velocity: {
       across: state.velocity.across * ratio,
       downhill: state.velocity.downhill * ratio,
@@ -36,7 +53,10 @@ export default async function setupRider(game) {
   let environment = Object.freeze({
     surface: "powder",
     surfaceHeight: snowSurfaceHeight,
-    surfaceNormal: snowSurfaceNormal,
+  });
+  // The chase camera reads the same snow the rider rides.
+  const cameraTerrain = Object.freeze({
+    height: (across, downhill) => snowSurfaceHeight(across, downhill, environment.surface),
   });
   let stance = "regular";
   let camera = createCameraState();
@@ -46,7 +66,6 @@ export default async function setupRider(game) {
   let pendingPace;
   let paceHold = 0;
   let paceTarget = 0;
-  let physicsRemainder = 0;
   let previousTimestamp;
   let state = createRiderState({ surface: environment.surface });
 
@@ -68,7 +87,6 @@ export default async function setupRider(game) {
         : undefined,
       surface: event.detail?.surface ?? environment.surface,
       surfaceHeight: snowSurfaceHeight,
-      surfaceNormal: snowSurfaceNormal,
     });
   });
 
@@ -95,7 +113,6 @@ export default async function setupRider(game) {
     pendingPace = undefined;
     paceHold = 0;
     paceTarget = 0;
-    physicsRemainder = 0;
     state = createRiderState({
       speed: Number(event.detail?.speed) || 16,
       stance,
@@ -133,14 +150,14 @@ export default async function setupRider(game) {
     }
     const wasCrashed = state.crashed;
     pendingJump = Math.max(pendingJump, input.jump);
-    physicsRemainder += deltaSeconds;
+    const physics = planPhysicsSteps(deltaSeconds);
     let launched = 0;
-    while (physicsRemainder + 1e-9 >= PHYSICS_STEP) {
+    for (let index = 0; index < physics.count; index += 1) {
       launched = Math.max(launched, pendingJump);
       state = stepRider(
         state,
         { ...input, jump: pendingJump },
-        PHYSICS_STEP,
+        physics.step,
         {
           ...environment,
           lipDistance: sideHitLipDistance(state.position.across, state.position.downhill),
@@ -149,9 +166,8 @@ export default async function setupRider(game) {
       if (paceHold > 0 && state.speed > paceTarget) {
         state = setRiderSpeed(state, paceTarget);
       }
-      paceHold = Math.max(0, paceHold - PHYSICS_STEP);
+      paceHold = Math.max(0, paceHold - physics.step);
       pendingJump = 0;
-      physicsRemainder -= PHYSICS_STEP;
     }
     const frameInput = Object.freeze({ ...input, jump: launched });
     if (!wasCrashed && state.crashed) {
@@ -164,7 +180,7 @@ export default async function setupRider(game) {
         );
       }
     }
-    camera = stepCamera(camera, state, deltaSeconds);
+    camera = stepCamera(camera, state, deltaSeconds, cameraTerrain);
     let pose = animator.step(state, frameInput, deltaSeconds);
 
     const warning = clamp((state.impactMeter - 70) / 30, 0, 1);

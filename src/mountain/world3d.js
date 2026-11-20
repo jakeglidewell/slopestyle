@@ -686,18 +686,25 @@ export function createMountainWorld(canvas) {
       distance - followBehind, state.surface);
     const riderHeight = Number.isFinite(state.worldHeight)
       ? state.worldHeight : ground + (Number(state.air) || 0);
-    camera.position.set(
-      cameraAcross - 1.3,
-      Math.max(cameraGround + 2.55, riderHeight + airborne * 3.8) -
-        clamp(follow.dip || 0, 0, 1) * 0.25,
-      -distance + followBehind,
-    );
     const heading = Number.isFinite(state.heading) ? state.heading : 0;
     const targetAcross = across + 3 + Math.sin(heading) * 5.8;
     const targetDistance = distance + 15 + airborne * 20;
-    camera.lookAt(targetAcross,
-      snowSurfaceHeight(targetAcross, targetDistance, state.surface) + 3.7,
-      -targetDistance);
+    // The rider module's steadied rig when it sends one; the raw snow otherwise.
+    const rig = follow.rig;
+    if (rig) {
+      camera.position.set(rig.position.x, rig.position.y, rig.position.z);
+      camera.lookAt(rig.target.x, rig.target.y, rig.target.z);
+    } else {
+      camera.position.set(
+        cameraAcross - 1.3,
+        Math.max(cameraGround + 2.55, riderHeight + airborne * 3.8) -
+          clamp(follow.dip || 0, 0, 1) * 0.25,
+        -distance + followBehind,
+      );
+      camera.lookAt(targetAcross,
+        snowSurfaceHeight(targetAcross, targetDistance, state.surface) + 3.7,
+        -targetDistance);
+    }
     camera.rotateZ(clamp(follow.roll || 0, -0.06, 0.06));
     const fov = 60 + (1 - clamp(follow.zoom || 1, 0.8, 1)) * 20;
     if (Math.abs(camera.fov - fov) > 0.04) {

@@ -4,6 +4,7 @@ import test from "node:test";
 import { createRiderModel } from "../src/rider/model3d.js";
 import { createRiderAnimator } from "../src/rider/animation.js";
 import { createRiderState, stepRider } from "../src/rider/physics.js";
+import { snowSurfaceHeight, snowSurfaceNormal } from "../src/mountain/terrain3d.js";
 
 const state = (overrides = {}) => ({
   air: 0,
@@ -41,6 +42,56 @@ test("crouching lowers the rider without sinking the board", () => {
   rider.update(state(), { crouch: 0.9 }, 0);
 
   assert.ok(rider.body.position.y < tallBody - 0.4 && rider.board.position.y === boardHeight);
+});
+
+test("folded legs lower the hips and stretched legs raise them, board on the snow", () => {
+  const rider = createRiderModel();
+  rider.update(state(), { crouch: 0.3, legOffset: 0 }, 0);
+  const neutralHips = rider.body.position.y;
+  const boardHeight = rider.board.position.y;
+  rider.update(state(), { crouch: 0.3, legOffset: -0.3 }, 0);
+  const foldedHips = rider.body.position.y;
+  rider.update(state(), { crouch: 0.3, legOffset: 0.3 }, 0);
+
+  assert.ok(Math.abs(foldedHips - (neutralHips - 0.3)) < 0.01);
+  assert.ok(Math.abs(rider.body.position.y - (neutralHips + 0.3)) < 0.01);
+  assert.equal(rider.board.position.y, boardHeight);
+});
+
+test("the legs never fold through the board or stretch past straight", () => {
+  const rider = createRiderModel();
+  rider.update(state(), { crouch: 1, legOffset: -0.42 }, 0);
+  const lowest = rider.body.position.y - rider.board.position.y;
+  rider.update(state({ air: 1 }), { crouch: 0, jumpStretch: 1, legOffset: 0.45 }, 0);
+  const tallest = rider.body.position.y - rider.board.position.y;
+
+  assert.ok(lowest > 0.4, `hips ${lowest.toFixed(2)} m above the board`);
+  assert.ok(tallest < 1.5, `hips ${tallest.toFixed(2)} m above the board`);
+});
+
+test("over powder the hips ride the body's smooth line while the board follows the snow", () => {
+  const rider = createRiderModel();
+  const animator = createRiderAnimator();
+  const mountain = { surface: "powder", surfaceHeight: snowSurfaceHeight,
+    surfaceNormal: snowSurfaceNormal };
+  let current = createRiderState({ speed: 24, surface: "powder" });
+  const hips = [];
+  const boards = [];
+  for (let frame = 0; frame < 240; frame += 1) {
+    for (let step = 0; step < 2; step += 1) current = stepRider(current, {}, 1 / 120, mountain);
+    const pose = animator.step(current, {}, 1 / 60);
+    const snow = snowSurfaceHeight(current.position.across, current.position.downhill, "powder");
+    rider.update(current, pose, snow);
+    if (frame < 60 || !current.grounded) continue;
+    // Take out the hill itself: what is left is how much each part bobs.
+    hips.push(rider.body.position.y - current.worldHeight + current.ride);
+    boards.push(rider.board.position.y - current.worldHeight + current.ride);
+  }
+  const swing = (values) => Math.max(...values) - Math.min(...values);
+
+  assert.ok(swing(boards) > 0.3, `the board only moved ${swing(boards).toFixed(2)} m`);
+  assert.ok(swing(hips) < swing(boards) * 0.5,
+    `hips swung ${swing(hips).toFixed(2)} m, the board ${swing(boards).toFixed(2)} m`);
 });
 
 test("holding crouch visibly lowers the helmet within a third of a second", () => {

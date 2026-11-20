@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createRiderAnimator, getRiderPose } from "../src/rider/animation.js";
-import { createRiderState } from "../src/rider/physics.js";
+import { createRiderState, stepRider } from "../src/rider/physics.js";
 
 test("the rider leans into the engaged edge", () => {
   const pose = getRiderPose(createRiderState({ edge: 0.75 }));
@@ -44,11 +44,22 @@ test("the rider tucks near the top of a jump", () => {
   assert.ok(apex.crouch > rising.crouch);
 });
 
-test("landing compression visibly lowers the rider stance", () => {
+test("leg travel reaches the pose once, as leg travel", () => {
   const neutral = getRiderPose(createRiderState({ compression: 0 }));
-  const landing = getRiderPose(createRiderState({ compression: 1 }));
+  const landing = getRiderPose(createRiderState({ compression: 0.7, legOffset: -0.3 }));
+  const reaching = getRiderPose(createRiderState({ legOffset: 0.3 }));
 
-  assert.ok(landing.crouch > neutral.crouch);
+  assert.equal(landing.legOffset, -0.3);
+  assert.equal(reaching.legOffset, 0.3);
+  // The hips drop by the leg travel itself; the crouch must not count it again.
+  assert.equal(landing.crouch, neutral.crouch);
+});
+
+test("a stumble out of a sketchy landing shows in the pose", () => {
+  const steady = getRiderPose(createRiderState({ speed: 18 }));
+  const stumbling = getRiderPose(createRiderState({ speed: 18, stumble: 0.45 }));
+
+  assert.ok(stumbling.stumble > steady.stumble + 0.4);
 });
 
 test("a skidding board slips across the direction of travel", () => {
@@ -223,14 +234,22 @@ test("the rider gathers in the air and opens before touching down", () => {
 
 test("the landing folds quickly and rises more slowly", () => {
   const animator = createRiderAnimator();
-  const glide = createRiderState({ speed: 18 });
-  const impact = createRiderState({ speed: 18, compression: 1, landingImpact: 6 });
-  const rest = animator.step(glide, {}, 1 / 60);
-  const absorbed = animator.step(impact, {}, 1 / 60);
-  const recovering = animator.step(glide, {}, 1 / 60);
+  const level = { slopeGrade: 0.08, surface: "groomed", surfaceHeight: () => 0,
+    surfaceNormal: () => ({ x: 0, y: 1, z: 0 }) };
+  let state = createRiderState({ air: 0.6, airtime: 0.3, grounded: false, speed: 18,
+    worldHeight: 0.6, worldVerticalVelocity: -3 });
+  const legs = [];
+  for (let step = 0; step < 240; step += 1) {
+    state = stepRider(state, {}, 1 / 120, level);
+    if (state.grounded) legs.push(animator.step(state, {}, 1 / 120).legOffset);
+  }
+  const deepest = legs.indexOf(Math.min(...legs));
+  const risen = legs.findIndex((leg, index) => index > deepest && leg > legs[deepest] * 0.2);
 
-  assert.ok(absorbed.crouch > rest.crouch + 0.08);
-  assert.ok(recovering.crouch > rest.crouch + 0.08);
+  assert.ok(legs[0] > 0.1 && legs[deepest] < -0.05);
+  assert.ok(deepest / 120 < 0.25, `folded in ${(deepest / 120).toFixed(2)} s`);
+  assert.ok(risen - deepest > deepest,
+    `folded in ${(deepest / 120).toFixed(2)} s, rose in ${((risen - deepest) / 120).toFixed(2)} s`);
 });
 
 test("a flick rises before the edge bites and folds the legs", () => {

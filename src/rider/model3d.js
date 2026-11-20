@@ -1,4 +1,5 @@
 import * as THREE from "../vendor/three/three.module.js";
+import { LEG_COMPRESS, LEG_REACH } from "./legs.js";
 
 const material = (color, roughness = 0.92) =>
   new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
@@ -27,6 +28,9 @@ const PALETTE = Object.freeze({
 });
 
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+// Hip height over the board with the legs fully folded and fully straight.
+const HIP_LOWEST = 0.46;
+const HIP_TALLEST = 1.46;
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
 const finiteOr = (value, fallback = 0) =>
@@ -269,11 +273,12 @@ export function createRiderModel() {
     const jumpStretch = clamp(finiteOr(pose.jumpStretch), 0, 1);
     const grab = clamp(finiteOr(pose.grab), 0, 1);
     const lean = clamp(finiteOr(pose.bodyTilt, finiteOr(pose.lean) * 0.55), -0.8, 0.8);
-    const suspension = clamp((finiteOr(pose.bob) - finiteOr(pose.boardBob)) * 0.3,
-      -0.18, 0.18);
+    // The hips sit on the physics body: leg travel moves them, not the board.
+    const legOffset = clamp(finiteOr(pose.legOffset), -LEG_COMPRESS, LEG_REACH);
+    const legFold = clamp(-legOffset / LEG_COMPRESS, 0, 1);
     const snowResponse = clamp(finiteOr(pose.snowResponse), 0, 1);
-    const hipHeight = 1.24 - crouch * 0.72 + jumpStretch * 0.22 + suspension -
-      snowResponse * (air > 0 ? 0 : 0.08);
+    const hipHeight = clamp(1.24 - crouch * 0.72 + jumpStretch * 0.22 + legOffset -
+      snowResponse * (air > 0 ? 0 : 0.08), HIP_LOWEST, HIP_TALLEST);
     const ridingHeight = groundHeight + air;
     const slopePitch = Math.atan2(finiteOr(groundNormal.z, -0.35),
       finiteOr(groundNormal.y, 1));
@@ -297,7 +302,7 @@ export function createRiderModel() {
     tips[1].rotation.x = 0.12 + flex * 0.12;
     body.position.set(lean * 0.32, ridingHeight + hipHeight,
       finiteOr(pose.foreAft) * 0.13);
-    body.rotation.set(-Math.max(0, crouch - 0.3) * 0.3 + jumpStretch * 0.12 -
+    body.rotation.set(-Math.max(0, crouch + legFold * 0.35 - 0.3) * 0.3 + jumpStretch * 0.12 -
       grab * 0.25 + finiteOr(pose.stumble) * 0.07,
       0.58 - bodyYaw + finiteOr(pose.upperBodyTwist) * 0.09,
       -lean * 0.68 + finiteOr(pose.fallRotation) * 0.6);
@@ -314,7 +319,8 @@ export function createRiderModel() {
       const hip = new THREE.Vector3(0, 0, side * 0.25)
         .applyEuler(body.rotation).add(body.position);
       const knee = new THREE.Vector3(
-        (foot.x + hip.x) * 0.5 + 0.08 + crouch * 0.075 + snowResponse * 0.04,
+        (foot.x + hip.x) * 0.5 + 0.08 + (crouch + legFold * 0.5) * 0.075 +
+          snowResponse * 0.04,
         (foot.y + hip.y) * 0.5 + 0.08,
         (foot.z + hip.z) * 0.5 + side * 0.07,
       );
