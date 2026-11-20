@@ -411,14 +411,21 @@ export const spawnHazard = (state, riderDownhill, courseSpeed, riderAcross = 0,
     };
   }
 
-  const actionRoll = random();
-  let kind = "steer";
   const sideHit = sideHitFeatureAt(Math.max(0,
     Math.round((worldDownhill - SIDE_HIT_FIRST_LIP) / SIDE_HIT_SPACING)));
   // Alongside a side hit, nothing may lie on its run-in or its landing.
   const clearSideHit = worldDownhill >= sideHit.start - 4 &&
     worldDownhill <= sideHit.lip + 42;
 
+  if (!clearSideHit && state.nextHazardId >= state.nextLongLogId) {
+    const kind = state.nextLongLogKind;
+    state.nextLongLogId = state.nextHazardId + 8 + Math.floor(random() * 5);
+    state.nextLongLogKind = kind === "jump" ? "duck" : "jump";
+    return { ...hazard, kind, variant: "full-width-log", radius: half + 0.75, x: 0 };
+  }
+
+  const actionRoll = random();
+  let kind = "steer";
   if (state.dodged > 4 && actionRoll > 0.82) {
     kind = "duck";
   } else if (state.dodged > 2 && actionRoll > 0.64) {
@@ -471,6 +478,8 @@ const emptyRunState = (best, bestScore) => ({
   lastRiderDownhill: 0,
   nextBoulderId: 4 + Math.floor(Math.random() * 3),
   nextHazardId: 1,
+  nextLongLogId: 6 + Math.floor(Math.random() * 3),
+  nextLongLogKind: Math.random() < 0.5 ? "jump" : "duck",
   phase: "idle",
   spawnLeft: 12,
   speed: 0,

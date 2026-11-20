@@ -621,8 +621,8 @@ const drawPisteMarkers = (context, canvas, riderAcross, travel) => {
   }
 };
 
-const drawJumpHazard = (context, canvas, projected) => {
-  const width = projected.pathHalf * 2.08;
+const drawJumpHazard = (context, canvas, projected, span = 1.04) => {
+  const width = projected.pathHalf * span * 2;
   const height = Math.max(7, projected.pathHalf / COURSE.halfWidth * 0.72);
   const { x, y } = projected;
 
@@ -700,10 +700,10 @@ const drawBird = (context, canvas, projected) => {
   context.fill();
 };
 
-const drawBranch = (context, canvas, projected) => {
+const drawBranch = (context, canvas, projected, span = 1.04) => {
   const scale = projected.pathHalf / COURSE.halfWidth / 32;
   const y = projected.y - 83 * scale;
-  const half = projected.pathHalf * 1.04;
+  const half = projected.pathHalf * span;
   const x = projected.x;
 
   context.fillStyle = "rgba(29,47,65,0.16)";
@@ -808,13 +808,14 @@ const drawHazards = (context, canvas, riderAcross, travel, hazards) => {
     const projected = projectCoursePoint(canvas, riderAcross, hazard, { ...COURSE, travel });
     context.save();
     context.globalAlpha = projected.alpha;
+    const span = hazard.radius === undefined ? undefined : hazard.radius / COURSE.halfWidth;
 
     if (hazard.kind === "jump") {
-      drawJumpHazard(context, canvas, projected);
+      drawJumpHazard(context, canvas, projected, span);
       if (hazard.z > 3) drawActionCue(context, projected, "jump");
     } else if (hazard.kind === "duck") {
       if (hazard.variant === "bird") drawBird(context, canvas, projected);
-      else drawBranch(context, canvas, projected);
+      else drawBranch(context, canvas, projected, span);
       if (hazard.z > 3) drawActionCue(context, projected, "duck");
     } else if (hazard.variant === "rolling-boulder") {
       drawRollingBoulder(context, projected, hazard);

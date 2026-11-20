@@ -112,6 +112,36 @@ test("natural hazard collision spans match their rendered size", () => {
   assert.equal(hazardHitsRider(log, { position: { across: 7.5 }, air: 0 }), false);
 });
 
+test("occasional full-width logs alternate actions and cover both course edges", () => {
+  const state = {
+    dodged: 20, lastLane: -1, nextBoulderId: 6, nextHazardId: 1,
+    nextLongLogId: 6, nextLongLogKind: "jump",
+  };
+  const random = seeded(11);
+  const logs = [];
+  for (let index = 0; index < 70; index += 1) {
+    const hazard = spawnHazard(state, index * 39, 28, 0, random);
+    if (hazard.variant === "full-width-log") logs.push({ ...hazard, z: 0 });
+    state.nextHazardId += 1;
+  }
+  assert.ok(logs.length >= 3);
+  assert.equal(logs[0].kind, "jump");
+  for (const [index, log] of logs.entries()) {
+    assert.equal(log.kind, index % 2 ? "duck" : "jump");
+    if (index > 0) assert.ok(log.id - logs[index - 1].id >= 8);
+    for (const across of [-COURSE.halfWidth, 0, COURSE.halfWidth]) {
+      const rider = { position: { across }, air: 0 };
+      assert.equal(hazardHitsRider(log, rider), true);
+      assert.equal(hazardHitsRider(log, { ...rider, air: 0.6 }, { crouch: 1 }), false);
+      if (log.kind === "duck") {
+        assert.equal(hazardHitsRider(log, rider, { crouch: 1 }), false);
+      } else {
+        assert.equal(hazardHitsRider(log, rider, { crouch: 1 }), true);
+      }
+    }
+  }
+});
+
 test("every kind of obstacle turns up, each the size of the real thing", () => {
   const spawned = spawnMany(600);
   const sizes = new Map();
