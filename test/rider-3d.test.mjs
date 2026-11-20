@@ -591,3 +591,61 @@ test("riding flat across a side slope, the board lies the way the snow does", ()
 
   assert.ok(high > low + 0.01, `uphill edge ${high.toFixed(3)} m, downhill edge ${low.toFixed(3)} m`);
 });
+
+/** How far `point` is from the nearest of the straight bones between `joints`. */
+const offBones = (point, joints) => Math.min(...joints.slice(1).map((end, index) => {
+  const start = joints[index];
+  const bone = end.clone().sub(start);
+  const along = Math.min(1, Math.max(0, point.clone().sub(start).dot(bone) / bone.lengthSq()));
+  return point.distanceTo(start.clone().addScaledVector(bone, along));
+}));
+const furthestCloth = (mesh, joints) => {
+  const { position } = mesh.geometry.attributes;
+  const corner = new THREE.Vector3();
+  let furthest = 0;
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    corner.fromBufferAttribute(position, vertex).applyMatrix4(mesh.matrixWorld);
+    furthest = Math.max(furthest, offBones(corner, joints));
+  }
+  return furthest;
+};
+
+test("cloth rounds a folded knee or elbow instead of spiking out of it", () => {
+  const rider = createRiderModel();
+  for (const [riding, pose] of [
+    [state(), { crouch: 0.95, legOffset: -0.2 }],
+    [state(), { crouch: 0.7, bodyTilt: 0.6, boardRoll: 0.8 }],
+    [state({ air: 1.5 }), { crouch: 0.9, grab: 1 }],
+    [state(), { crouch: 0.5, arms: [{ x: 0.3, y: 0.1, out: 0.1 }, { x: 0.35, y: -0.1, out: 0.05 }] }],
+  ]) {
+    rider.update(riding, pose, 0);
+    const joint = jointsOf(rider);
+    const legs = partsOf(rider, (part) => part === "baggy-pant-leg");
+    const sleeves = partsOf(rider, (part) => part === "long-sleeve");
+    for (const side of [0, 1]) {
+      // No corner of the cloth stands further off the limb than loose cloth hangs.
+      const leg = furthestCloth(legs[side], [joint.hips[side], joint.knees[side], joint.ankles[side]]);
+      const arm = furthestCloth(sleeves[side],
+        [joint.shoulders[side], joint.elbows[side], joint.hands[side]]);
+      assert.ok(leg < 0.27, `pant leg ${side} sticks ${leg.toFixed(2)} m off the leg, crouch ${pose.crouch}`);
+      assert.ok(arm < 0.12, `sleeve ${side} sticks ${arm.toFixed(2)} m off the arm, crouch ${pose.crouch}`);
+    }
+  }
+});
+
+test("at speed the pant leg ripples as one piece: no loop of cloth jerks against the next", () => {
+  const rider = createRiderModel();
+  const [leg] = partsOf(rider, (part) => part === "baggy-pant-leg");
+  let before;
+  let worst = 0;
+  for (let frame = 0; frame < 90; frame += 1) {
+    rider.update(state({ elapsed: 3 + frame / 60, speed: 32 }), { crouch: 0.4 }, 0, LEVEL);
+    const now = Float32Array.from(leg.geometry.attributes.position.array);
+    if (before && frame > 20) {
+      for (let at = 0; at < now.length; at += 1) worst = Math.max(worst, Math.abs(now[at] - before[at]));
+    }
+    before = now;
+  }
+
+  assert.ok(worst < 0.004, `a corner of the cloth jumped ${(worst * 1000).toFixed(1)} mm in one frame`);
+});

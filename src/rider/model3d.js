@@ -66,6 +66,8 @@ const SPINE_TWIST = 0.8;
 const FREE_REACH = 0.94;
 const FULL_REACH = 0.985;
 const ARM = UPPER_ARM + FOREARM + PALM;
+// How much leg, either side of the knee, the pant cloth takes to come round it.
+const KNEE_ROUND = 0.16;
 const LEG = THIGH + SHIN;
 
 const clamp = (value, minimum, maximum) =>
@@ -338,7 +340,7 @@ const drape = (cloth, hint) => {
       bend.subVectors(out, into);
       if (bend.lengthSq() > 1e-6) {
         bend.normalize();
-        widen = 1 / Math.max(0.62, ring.normal.dot(into));
+        widen = 1 / Math.max(0.82, ring.normal.dot(into));
       }
       ring.forward.copy(loop === 0 ? hint : path[loop - 1].forward);
       ring.forward.addScaledVector(ring.normal, -ring.forward.dot(ring.normal));
@@ -407,12 +409,12 @@ export function createRiderModel() {
   const undershirt = createCloth(group, 2, 8, PALETTE.sleeve, "undershirt-hem");
   const seat = createCloth(group, 5, 8, PALETTE.pants, "pant-seat");
   const legs = [0, 1].map(() => ({
-    cloth: createCloth(group, 9, 8, PALETTE.pants, "baggy-pant-leg"),
+    cloth: createCloth(group, 11, 8, PALETTE.pants, "baggy-pant-leg"),
     cuff: createCloth(group, 3, 8, PALETTE.pantsShade, "stacked-pant-cuff"),
     pocket: solid(new THREE.BoxGeometry(0.16, 0.19, 0.04), PALETTE.pantsShade,
       group, [0, 0, 0], "cargo-pocket"),
     // Where each loop of cloth was a moment ago: cloth trails what it hangs on.
-    trail: Array.from({ length: 9 }, () => new THREE.Vector3()),
+    trail: Array.from({ length: 11 }, () => new THREE.Vector3()),
   }));
   const arms = [0, 1].map(() => {
     const mitt = solid(new THREE.BoxGeometry(0.075, 0.19, 0.115), PALETTE.mitt,
@@ -445,7 +447,7 @@ export function createRiderModel() {
   let standGrade = 0.35;
   let lastElapsed;
   const gaze = new THREE.Quaternion();
-  const v = Object.fromEntries(["anchor", "back", "down", "drag", "front", "hang", "limb",
+  const v = Object.fromEntries(["anchor", "back", "crease", "down", "drag", "front", "hang", "limb",
     "nose", "offset", "pelvisFront", "pelvisUp", "pole", "reach", "right", "shin", "side",
     "thigh", "toe", "travel", "upright", "waist", "wind", "wrist"]
     .map((name) => [name, new THREE.Vector3()]));
@@ -660,29 +662,42 @@ export function createRiderModel() {
       // folded thigh, is pressed back by the wind, ripples at speed, and trails
       // whatever the leg has just done.
       const { path } = leg.cloth;
+      // Cloth cannot turn a sharp corner: either side of the knee it takes
+      // `KNEE_ROUND` of leg to come round, cutting inside the joint as it does.
+      const kneeTurn = Math.acos(clamp(v.thigh.dot(v.shin), -1, 1));
+      v.crease.subVectors(v.shin, v.thigh);
+      if (v.crease.lengthSq() > 1e-8) v.crease.normalize();
       const loops = [
-        [null, 0, 0.14, 0.13, 0, 0, 0],
-        [null, 0, 0.166, 0.152, 0, 0, 0],
+        ["waist", 0, 0.14, 0.13, 0, 0, 0],
+        ["hip", 0, 0.166, 0.152, 0, 0, 0],
         [v.thigh, 0.34, 0.17, 0.16, 0.04, 0.012, 0.3],
-        [v.thigh, 0.68, 0.168, 0.16, 0.034, 0.014, 0.5],
-        [v.shin, 0, 0.172, 0.166, 0.016, 0.016, 0.7],
-        [v.shin, 0.42, 0.174, 0.168, 0.02, 0.03, 0.9],
+        [v.thigh, 0.66, 0.168, 0.16, 0.034, 0.014, 0.5],
+        ["above", 0, 0.166, 0.164, 0.02, 0.014, 0.6],
+        ["knee", 0, 0.164, 0.168, 0.012, 0.016, 0.65],
+        ["below", 0, 0.168, 0.166, 0.016, 0.02, 0.75],
+        [v.shin, 0.45, 0.174, 0.168, 0.02, 0.03, 0.9],
         [v.shin, 0.7, 0.176, 0.17, 0.012, 0.04, 1],
         [v.shin, 0.95, 0.178, 0.172, 0, 0.034, 0.85],
         [v.shin, 1.03, 0.176, 0.17, 0, 0.03, 0.8],
       ];
-      loops.forEach(([bone, along, rx, rz, sag, blown, loose], at) => {
+      loops.forEach(([where, along, rx, rz, sag, blown, loose], at) => {
         const center = path[at].center;
-        if (at === 0) center.copy(hip).addScaledVector(v.pelvisUp, 0.1);
-        else if (at === 1) center.copy(hip).addScaledVector(v.pelvisFront, -0.03);
-        else if (bone === v.thigh) center.copy(hip).lerp(knee, along);
-        else center.copy(knee).lerp(ankle, along);
+        let bone = null;
+        if (where === "waist") center.copy(hip).addScaledVector(v.pelvisUp, 0.1);
+        else if (where === "hip") center.copy(hip).addScaledVector(v.pelvisFront, -0.03);
+        else if (where === "above") center.copy(knee).addScaledVector(bone = v.thigh, -KNEE_ROUND);
+        else if (where === "below") center.copy(knee).addScaledVector(bone = v.shin, KNEE_ROUND);
+        else if (where === "knee") {
+          bone = v.shin;
+          center.copy(knee).addScaledVector(v.crease, KNEE_ROUND * Math.tan(kneeTurn / 4) - 0.015);
+        } else {
+          bone = where;
+          if (bone === v.thigh) center.copy(hip).lerp(knee, along);
+          else center.copy(knee).lerp(ankle, along);
+        }
         if (bone) {
           center.addScaledVector(hangOff(bone, v.down), sag);
           center.addScaledVector(hangOff(bone, v.travel), -blown * rush);
-          v.side.crossVectors(v.travel, bone);
-          center.addScaledVector(v.side, Math.sin(clock * (15 + at * 2.3) + at * 1.9 +
-            side * 2.4) * 0.014 * rush * loose);
         }
         // Trail: the cloth is a beat behind the bone it hangs on.
         const behind = leg.trail[at];
@@ -692,10 +707,16 @@ export function createRiderModel() {
           v.limb.subVectors(behind, center).multiplyScalar(loose);
           if (v.limb.length() > 0.08) v.limb.setLength(0.08);
           center.add(v.limb);
-          // Keep what was remembered tied to the bone, not to the drawn cloth.
+          // What is remembered stays tied to the bone, not to the drawn cloth.
           behind.sub(v.offset).clampLength(0, 0.3).add(v.offset);
         } else {
           behind.copy(center);
+        }
+        // At speed one slow ripple runs down the leg, the same wave loop to loop.
+        if (bone) {
+          v.side.crossVectors(v.travel, bone);
+          center.addScaledVector(v.side,
+            Math.sin(clock * 11 - at * 0.9 + side * 2.4) * 0.006 * rush * loose);
         }
         path[at].rx = rx;
         path[at].rz = rz;
@@ -703,9 +724,9 @@ export function createRiderModel() {
       });
       drape(leg.cloth, v.toe);
       // The cuff pools on the boot.
-      loop(leg.cuff, 0, v.offset.copy(path[6].center).lerp(path[7].center, 0.5), 0.186, 0.18);
-      loop(leg.cuff, 1, path[8].center, 0.2, 0.192);
-      loop(leg.cuff, 2, v.offset.copy(path[8].center).addScaledVector(v.shin, 0.075), 0.194, 0.184);
+      loop(leg.cuff, 0, v.offset.copy(path[8].center).lerp(path[9].center, 0.5), 0.186, 0.18);
+      loop(leg.cuff, 1, path[10].center, 0.2, 0.192);
+      loop(leg.cuff, 2, v.offset.copy(path[10].center).addScaledVector(v.shin, 0.075), 0.194, 0.184);
       drape(leg.cuff, v.toe);
       const length = leg.pocket.scale.y;
       aim(leg.pocket, hip, knee, v.toe);
@@ -750,7 +771,10 @@ export function createRiderModel() {
       drape(arm.tee, v.front);
       loop(arm.sleeve, 0, v.offset.copy(shoulder).addScaledVector(v.limb, 0.14), 0.08, 0.08);
       loop(arm.sleeve, 1, v.offset.copy(shoulder).addScaledVector(v.limb, 0.29), 0.078, 0.078);
-      loop(arm.sleeve, 2, elbow, 0.08, 0.08);
+      v.crease.subVectors(v.reach, v.limb);
+      if (v.crease.lengthSq() > 1e-8) v.crease.normalize();
+      loop(arm.sleeve, 2, v.offset.copy(elbow).addScaledVector(v.crease,
+        0.11 * Math.tan(Math.acos(clamp(v.limb.dot(v.reach), -1, 1)) / 4)), 0.08, 0.08);
       loop(arm.sleeve, 3, v.offset.copy(elbow).addScaledVector(v.reach, 0.11)
         .addScaledVector(hangOff(v.reach, v.down), 0.01), 0.077, 0.077);
       loop(arm.sleeve, 4, v.offset.copy(elbow).lerp(v.wrist, 0.6)
