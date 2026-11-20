@@ -2,7 +2,15 @@ import * as THREE from "../vendor/three/three.module.js";
 import { createRiderModel } from "../rider/model3d.js";
 import { createSnowTrackTrail } from "../rider/renderer.js";
 import { CHUNK_LENGTH, COURSE_HALF_WIDTH, visibleSlopeChunks } from "./course.js";
-import { snowSurfaceHeight, snowSurfaceNormal } from "./terrain3d.js";
+import {
+  SIDE_HIT_FIRST_LIP,
+  SIDE_HIT_SPACING,
+  sideHitFeatureAt,
+  sideHitReliefAt,
+  snowRutProfile,
+  snowSurfaceHeight,
+  snowSurfaceNormal,
+} from "./terrain3d.js";
 
 const TERRAIN_LENGTH = 36;
 const TERRAIN_AHEAD = 246;
@@ -22,6 +30,10 @@ const needleMaterials = [0x1b4c42, 0x285c4e, 0x356d58].map(
 const snowMaterial = new THREE.MeshStandardMaterial({ color: 0xeaf3f3, roughness: 0.98 });
 const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x697b83, roughness: 0.98, flatShading: true });
 const rockShadeMaterial = new THREE.MeshStandardMaterial({ color: 0x4e626c, roughness: 1, flatShading: true });
+const flagMaterial = new THREE.MeshStandardMaterial({ color: 0xd96c50, roughness: 0.83,
+  side: THREE.DoubleSide, flatShading: true });
+const landingFlagMaterial = new THREE.MeshStandardMaterial({ color: 0x3d8793, roughness: 0.86,
+  side: THREE.DoubleSide, flatShading: true });
 const edgeBaseMaterial = new THREE.MeshBasicMaterial({
   color: 0x79adb8, opacity: 0.65, transparent: true, depthWrite: false,
   side: THREE.DoubleSide,
@@ -90,23 +102,35 @@ const makeTerrain = (index) => {
   const colors = [];
   const uvs = [];
   const indices = [];
-  const columns = 42;
-  const rows = 12;
-  const width = 82;
+  const acrossSamples = [];
+  for (let x = -41; x < -10; x += 2.5) acrossSamples.push(x);
+  for (let x = -10; x <= 10 + 1e-8; x += 0.5) acrossSamples.push(x);
+  for (let x = 12.5; x < 41; x += 2.5) acrossSamples.push(x);
+  acrossSamples.push(41);
+  const columns = acrossSamples.length - 1;
+  const rows = 48;
   const groomed = new THREE.Color(0xeaf1f1);
   const shoulder = new THREE.Color(0xc8dde2);
   const color = new THREE.Color();
+  const jumpSnow = new THREE.Color(0xd3e9e9);
+  const landingSnow = new THREE.Color(0xb7d6df);
+  const baseHeights = [];
 
   for (let row = 0; row <= rows; row += 1) {
     const downhill = index * TERRAIN_LENGTH + row / rows * TERRAIN_LENGTH;
     for (let column = 0; column <= columns; column += 1) {
-      const across = -width / 2 + column / columns * width;
-      positions.push(across, snowSurfaceHeight(across, downhill), -downhill);
+      const across = acrossSamples[column];
+      const height = snowSurfaceHeight(across, downhill);
+      positions.push(across, height, -downhill);
+      baseHeights.push(height);
       uvs.push(across / 8, downhill / 8);
       const edge = clamp((Math.abs(across) - 7.7) / 8, 0, 1);
       const variation = (Math.sin(downhill * 0.33 + across * 0.47) +
         Math.sin(downhill * 0.12 - across * 0.81)) * 0.019;
       color.copy(groomed).lerp(shoulder, edge).offsetHSL(0, 0, variation);
+      const relief = sideHitReliefAt(across, downhill);
+      if (relief > 0.15) color.lerp(jumpSnow, clamp(relief / 1.1, 0, 1) * 0.3);
+      if (relief < -0.1) color.lerp(landingSnow, clamp(-relief / 0.35, 0, 1) * 0.14);
       colors.push(color.r, color.g, color.b);
     }
   }
@@ -127,7 +151,14 @@ const makeTerrain = (index) => {
   const mesh = new THREE.Mesh(geometry, terrainMaterial);
   mesh.receiveShadow = true;
   mesh.frustumCulled = false;
-  return mesh;
+  return {
+    mesh,
+    acrossSamples,
+    baseHeights: Float32Array.from(baseHeights),
+    baseColors: Float32Array.from(colors),
+    rutOffsets: new Float32Array(baseHeights.length),
+    rows,
+  };
 };
 
 const makeSnowGrooves = (index) => {
@@ -260,6 +291,29 @@ const makeHazard = (hazard) => {
   return hazard.variant === "rock" ? makeRock(1.15) : makePine(1.25);
 };
 
+const makeSideHitMarkers = (feature) => {
+  const markers = new THREE.Group();
+  for (const [downhill, surface, height] of [
+    [feature.lip - 3, flagMaterial, 1.75],
+    [feature.lip + 26, landingFlagMaterial, 1.2],
+  ]) {
+    const x = feature.side * 10.7;
+    const pole = new THREE.Group();
+    pole.position.set(x, snowSurfaceHeight(x, downhill), -downhill);
+    solid(new THREE.CylinderGeometry(0.025, 0.035, height, 6),
+      rockShadeMaterial, pole, 0, height * 0.5, 0);
+    const pennant = new THREE.Shape();
+    pennant.moveTo(0, 0);
+    pennant.lineTo(0, 0.35);
+    pennant.lineTo(-feature.side * 0.48, 0.22);
+    pennant.closePath();
+    solid(new THREE.ShapeGeometry(pennant), surface, pole,
+      0, height - 0.38, 0);
+    markers.add(pole);
+  }
+  return markers;
+};
+
 const makeSky = () => {
   const geometry = new THREE.SphereGeometry(900, 24, 16);
   const position = geometry.getAttribute("position");
@@ -366,10 +420,11 @@ export function createMountainWorld(canvas) {
   const terrain = new Map();
   const scenery = new Map();
   const hazardMeshes = new Map();
+  const sideHitMeshes = new Map();
   const tracks = createSnowTrackTrail(750);
   const trackMesh = new THREE.Mesh(
     new THREE.BufferGeometry(),
-    new THREE.MeshBasicMaterial({ color: 0x739bab, transparent: true, opacity: 0.3,
+    new THREE.MeshBasicMaterial({ color: 0x739bab, transparent: true, opacity: 0.18,
       depthWrite: false, side: THREE.DoubleSide }),
   );
   trackMesh.renderOrder = 1;
@@ -386,6 +441,7 @@ export function createMountainWorld(canvas) {
 
   let course = { hazards: [], phase: "idle" };
   let previousElapsed = 0;
+  let lastSnowStamp = null;
 
   const resize = () => {
     const width = Math.max(1, canvas.clientWidth || window.innerWidth);
@@ -402,11 +458,11 @@ export function createMountainWorld(canvas) {
     const last = Math.ceil((distance + TERRAIN_AHEAD) / TERRAIN_LENGTH);
     for (let index = first; index <= last; index += 1) {
       if (terrain.has(index)) continue;
-      const mesh = makeTerrain(index);
+      const chunk = makeTerrain(index);
       const grooves = makeSnowGrooves(index);
       const edges = makeCourseEdges(index);
-      scene.add(mesh, grooves, ...edges);
-      terrain.set(index, { mesh, grooves, edges });
+      scene.add(chunk.mesh, grooves, ...edges);
+      terrain.set(index, { ...chunk, grooves, edges });
     }
     for (const [index, chunk] of terrain) {
       if (index >= first && index <= last) continue;
@@ -416,6 +472,119 @@ export function createMountainWorld(canvas) {
       chunk.grooves.material.dispose();
       for (const edge of chunk.edges) edge.geometry.dispose();
       terrain.delete(index);
+    }
+  };
+
+  const updateSideHitMarkers = (distance) => {
+    const first = Math.max(0, Math.floor((distance - 50 - SIDE_HIT_FIRST_LIP) /
+      SIDE_HIT_SPACING));
+    const last = Math.max(0, Math.ceil((distance + TERRAIN_AHEAD - SIDE_HIT_FIRST_LIP) /
+      SIDE_HIT_SPACING));
+    for (let index = first; index <= last; index += 1) {
+      if (sideHitMeshes.has(index)) continue;
+      const mesh = makeSideHitMarkers(sideHitFeatureAt(index));
+      scene.add(mesh);
+      sideHitMeshes.set(index, mesh);
+    }
+    for (const [index, mesh] of sideHitMeshes) {
+      if (index >= first && index <= last) continue;
+      scene.remove(mesh);
+      mesh.traverse((part) => part.geometry?.dispose());
+      sideHitMeshes.delete(index);
+    }
+  };
+
+  const readSnowRut = (across, downhill) => {
+    const chunkIndex = Math.floor(downhill / TERRAIN_LENGTH);
+    const chunk = terrain.get(chunkIndex);
+    if (!chunk) return 0;
+    const samples = chunk.acrossSamples;
+    let column = 0;
+    while (column < samples.length - 2 && samples[column + 1] < across) column += 1;
+    const acrossMix = clamp((across - samples[column]) /
+      (samples[column + 1] - samples[column]), 0, 1);
+    const rowValue = clamp((downhill - chunkIndex * TERRAIN_LENGTH) /
+      TERRAIN_LENGTH * chunk.rows, 0, chunk.rows);
+    const row = Math.min(chunk.rows - 1, Math.floor(rowValue));
+    const downhillMix = rowValue - row;
+    const stride = samples.length;
+    const at = (r, c) => chunk.rutOffsets[r * stride + c];
+    const near = at(row, column) * (1 - acrossMix) + at(row, column + 1) * acrossMix;
+    const far = at(row + 1, column) * (1 - acrossMix) +
+      at(row + 1, column + 1) * acrossMix;
+    return near * (1 - downhillMix) + far * downhillMix;
+  };
+
+  const resetSnowRuts = () => {
+    lastSnowStamp = null;
+    for (const chunk of terrain.values()) {
+      const position = chunk.mesh.geometry.getAttribute("position");
+      const color = chunk.mesh.geometry.getAttribute("color");
+      for (let index = 0; index < chunk.baseHeights.length; index += 1) {
+        if (chunk.rutOffsets[index] === 0) continue;
+        position.setY(index, chunk.baseHeights[index]);
+        color.setXYZ(index, chunk.baseColors[index * 3],
+          chunk.baseColors[index * 3 + 1], chunk.baseColors[index * 3 + 2]);
+      }
+      chunk.rutOffsets.fill(0);
+      position.needsUpdate = true;
+      color.needsUpdate = true;
+      chunk.mesh.geometry.computeVertexNormals();
+    }
+  };
+
+  const stampSnow = (state) => {
+    if (course.phase !== "running" || state.air > 0.08 || state.crashed) return;
+    const across = state.position.across;
+    const downhill = state.position.downhill;
+    if (lastSnowStamp && Math.hypot(across - lastSnowStamp.across,
+      downhill - lastSnowStamp.downhill) < 0.34) return;
+    lastSnowStamp = { across, downhill };
+    const depthBySurface = {
+      powder: 0.16, chop: 0.095, slush: 0.075,
+      groomed: 0.045, ice: 0.008, rail: 0,
+    };
+    const depth = (depthBySurface[state.surface] ?? 0.08) *
+      (0.7 + clamp(state.compression || 0, 0, 1) * 0.22 +
+        clamp(state.gForce || 0, 0, 1.5) * 0.12);
+    const width = 0.6 + clamp(state.skid || 0, 0, 1) * 0.3;
+    for (const [chunkIndex, chunk] of terrain) {
+      if (downhill < chunkIndex * TERRAIN_LENGTH - 2 ||
+          downhill > (chunkIndex + 1) * TERRAIN_LENGTH + 2) continue;
+      const positions = chunk.mesh.geometry.getAttribute("position");
+      const colors = chunk.mesh.geometry.getAttribute("color");
+      const samples = chunk.acrossSamples;
+      let changed = false;
+      for (let row = 0; row <= chunk.rows; row += 1) {
+        const sampleDownhill = chunkIndex * TERRAIN_LENGTH +
+          row / chunk.rows * TERRAIN_LENGTH;
+        if (Math.abs(sampleDownhill - downhill) > width * 3.4) continue;
+        for (let column = 0; column < samples.length; column += 1) {
+          const sampleAcross = samples[column];
+          if (Math.abs(sampleAcross - across) > width * 1.8) continue;
+          const offset = snowRutProfile(sampleAcross - across,
+            sampleDownhill - downhill, width, depth);
+          const vertex = row * samples.length + column;
+          const previous = chunk.rutOffsets[vertex];
+          const next = offset < 0 ? Math.min(previous, offset) :
+            previous < 0 ? previous : Math.max(previous, offset);
+          if (next === previous) continue;
+          chunk.rutOffsets[vertex] = next;
+          positions.setY(vertex, chunk.baseHeights[vertex] + next);
+          const trough = clamp(-next / 0.16, 0, 1);
+          const berm = clamp(next / 0.04, 0, 1);
+          colors.setXYZ(vertex,
+            chunk.baseColors[vertex * 3] * (1 - trough * 0.13 + berm * 0.035),
+            chunk.baseColors[vertex * 3 + 1] * (1 - trough * 0.08 + berm * 0.025),
+            chunk.baseColors[vertex * 3 + 2] * (1 - trough * 0.04 + berm * 0.02));
+          changed = true;
+        }
+      }
+      if (changed) {
+        positions.needsUpdate = true;
+        colors.needsUpdate = true;
+        chunk.mesh.geometry.computeVertexNormals();
+      }
     }
   };
 
@@ -476,15 +645,17 @@ export function createMountainWorld(canvas) {
     for (let index = 1; index < points.length; index += 1) {
       const a = points[index - 1];
       const b = points[index];
-      if (now - a.downhill > 52 || b.downhill > now + 0.2 ||
+      if (now - a.downhill > 5 || b.downhill > now + 0.2 ||
           b.downhill - a.downhill > 1.8) continue;
-      const width = b.kind === "carve" ? 0.045 : b.kind === "skid" ? 0.2 : 0.11;
+      const width = b.kind === "carve" ? 0.035 : b.kind === "skid" ? 0.14 : 0.07;
       const leftA = a.across - width;
       const rightA = a.across + width;
       const leftB = b.across - width;
       const rightB = b.across + width;
-      const ya = snowSurfaceHeight(a.across, a.downhill) + 0.032;
-      const yb = snowSurfaceHeight(b.across, b.downhill) + 0.032;
+      const ya = snowSurfaceHeight(a.across, a.downhill) +
+        readSnowRut(a.across, a.downhill) + 0.022;
+      const yb = snowSurfaceHeight(b.across, b.downhill) +
+        readSnowRut(b.across, b.downhill) + 0.022;
       vertices.push(
         leftA, ya, -a.downhill, rightA, ya, -a.downhill, leftB, yb, -b.downhill,
         rightA, ya, -a.downhill, rightB, yb, -b.downhill, leftB, yb, -b.downhill,
@@ -541,17 +712,22 @@ export function createMountainWorld(canvas) {
     const distance = Number.isFinite(position.downhill) ? position.downhill : 0;
     const across = Number.isFinite(position.across) ? position.across : 0;
     const elapsed = Number.isFinite(state.elapsed) ? state.elapsed : 0;
+    const restarted = elapsed < previousElapsed || elapsed === 0;
     const delta = elapsed < previousElapsed ? 0 : clamp(elapsed - previousElapsed, 0, 0.05);
     previousElapsed = elapsed;
-    if (elapsed === 0) {
+    if (restarted) {
       tracks.reset();
       particles.length = 0;
+      resetSnowRuts();
     }
 
     updateTerrain(distance);
+    updateSideHitMarkers(distance);
     updateScenery(distance);
     updateHazards();
-    const ground = snowSurfaceHeight(across, distance, state.surface);
+    stampSnow(state);
+    const ground = snowSurfaceHeight(across, distance, state.surface) +
+      readSnowRut(across, distance);
     rider.update(state, pose, ground,
       snowSurfaceNormal(across, distance, state.surface));
     updateTracks(state);
@@ -559,19 +735,31 @@ export function createMountainWorld(canvas) {
 
     const cameraAcross = Number.isFinite(follow.position?.across)
       ? follow.position.across : across;
-    const cameraGround = snowSurfaceHeight(cameraAcross - 1.3, distance - 6.2, state.surface);
-    camera.position.set(
-      cameraAcross - 1.3,
-      cameraGround + 2.55 + Math.max(0, state.air || 0) * 0.2 -
-        clamp(follow.dip || 0, 0, 1) * 0.25,
-      -distance + 6.2,
-    );
+    const airborne = clamp((Number(state.air) || 0) / 2, 0, 1);
+    const followBehind = 6.2 + airborne * 2.3;
+    const cameraGround = snowSurfaceHeight(cameraAcross - 1.3,
+      distance - followBehind, state.surface);
+    const riderHeight = Number.isFinite(state.worldHeight)
+      ? state.worldHeight : ground + (Number(state.air) || 0);
     const heading = Number.isFinite(state.heading) ? state.heading : 0;
     const targetAcross = across + 3 + Math.sin(heading) * 5.8;
-    const targetDistance = distance + 15;
-    camera.lookAt(targetAcross,
-      snowSurfaceHeight(targetAcross, targetDistance, state.surface) + 3.7,
-      -targetDistance);
+    const targetDistance = distance + 15 + airborne * 20;
+    // The rider module's steadied rig when it sends one; the raw snow otherwise.
+    const rig = follow.rig;
+    if (rig) {
+      camera.position.set(rig.position.x, rig.position.y, rig.position.z);
+      camera.lookAt(rig.target.x, rig.target.y, rig.target.z);
+    } else {
+      camera.position.set(
+        cameraAcross - 1.3,
+        Math.max(cameraGround + 2.55, riderHeight + airborne * 3.8) -
+          clamp(follow.dip || 0, 0, 1) * 0.25,
+        -distance + followBehind,
+      );
+      camera.lookAt(targetAcross,
+        snowSurfaceHeight(targetAcross, targetDistance, state.surface) + 3.7,
+        -targetDistance);
+    }
     camera.rotateZ(clamp(follow.roll || 0, -0.06, 0.06));
     const fov = 60 + (1 - clamp(follow.zoom || 1, 0.8, 1)) * 20;
     if (Math.abs(camera.fov - fov) > 0.04) {

@@ -7,6 +7,13 @@ import {
   sampleSnowTerrain,
   stepRider,
 } from "../src/rider/physics.js";
+import { LEG_COMPRESS, LEG_REACH } from "../src/rider/legs.js";
+import {
+  sideHitFeatureAt,
+  sideHitLipDistance,
+  snowSurfaceHeight,
+  snowSurfaceNormal,
+} from "../src/mountain/terrain3d.js";
 
 test("hitting an obstacle makes the rider tumble and lose speed", () => {
   const riding = createRiderState({
@@ -45,37 +52,34 @@ test("moving through powder produces physical bump contact", () => {
   assert.ok(strongestBump > 0.2 && Math.abs(state.terrainHeight) > 0.01);
 });
 
-test("a fast rider gets released by a powder crest unless crouched", () => {
-  const speed = 26;
-  const frameTravel = speed / 60;
-  let crest = 0;
-
-  for (let downhill = 0; downhill < 80; downhill += 0.02) {
-    const before = sampleSnowTerrain({ across: 0, downhill }, "powder");
-    const after = sampleSnowTerrain(
-      { across: 0, downhill: downhill + frameTravel },
-      "powder",
-    );
-    if (before.slope > 0.1 && after.slope < 0) {
-      crest = downhill;
-      break;
+test("holding a crouch over a side hit lip soaks up most of the kick", () => {
+  const feature = sideHitFeatureAt(0);
+  const kick = (input) => {
+    let state = createRiderState({
+      position: { across: feature.centerX, downhill: feature.start - 2 },
+      speed: 26,
+      surface: "groomed",
+    });
+    for (let frame = 0; frame < 360; frame += 1) {
+      state = stepRider(state, input, 1 / 120, {
+        lipDistance: sideHitLipDistance(state.position.across, state.position.downhill),
+        surface: "groomed",
+        surfaceHeight: snowSurfaceHeight,
+        surfaceNormal: snowSurfaceNormal,
+      });
+      // The body's vertical speed against the hill on the step it leaves the lip.
+      if (!state.grounded && state.position.downhill > feature.lip - 3) {
+        return state.verticalVelocity;
+      }
     }
-  }
+    return NaN;
+  };
+  const launched = kick({});
+  const absorbed = kick({ crouch: 1 });
 
-  const terrain = sampleSnowTerrain({ across: 0, downhill: crest }, "powder");
-  const initial = createRiderState({
-    position: { across: 0, downhill: crest },
-    speed,
-    surface: "powder",
-    terrainHeight: terrain.height,
-    terrainPitch: terrain.slope,
-  });
-  const launched = stepRider(initial, {}, 1 / 60, { surface: "powder" });
-  const absorbed = stepRider(initial, { crouch: 1 }, 1 / 60, {
-    surface: "powder",
-  });
-
-  assert.ok(launched.air > 0 && absorbed.air === 0);
+  assert.ok(launched > 1.5, `the upright rider left the lip at ${launched.toFixed(2)} m/s`);
+  assert.ok(absorbed < launched * 0.25,
+    `crouched ${absorbed.toFixed(2)} m/s against ${launched.toFixed(2)} m/s upright`);
 });
 
 test("speed and rear-foot pressure float the nose in powder", () => {
@@ -208,6 +212,25 @@ test("jump input launches a grounded rider", () => {
   assert.ok(state.air > 0 && state.verticalVelocity > 0);
 });
 
+test("a manual pop clears rising powder bumps instead of disappearing", () => {
+  for (let downhill = 0; downhill <= 250; downhill += 5) {
+    let state = createRiderState({
+      position: { across: 0, downhill },
+      speed: 20,
+      surface: "powder",
+    });
+    let peak = 0;
+    let airborneFrames = 0;
+    for (let frame = 0; frame < 48; frame += 1) {
+      state = stepRider(state, { jump: Number(frame === 0) }, 1 / 120, { surface: "powder" });
+      peak = Math.max(peak, state.air);
+      if (state.air > 0.02) airborneFrames += 1;
+    }
+    assert.ok(peak > 0.18 && airborneFrames > 14,
+      `pop at ${downhill} m reached ${peak.toFixed(2)} m for ${airborneFrames} frames`);
+  }
+});
+
 test("an airborne rider falls and lands back on the snow", () => {
   let state = stepRider(createRiderState(), { jump: 1 }, 1 / 60);
 
@@ -264,16 +287,22 @@ test("airborne steering is weaker than steering on snow", () => {
   assert.ok(Math.abs(airborne.heading) < Math.abs(grounded.heading));
 });
 
-test("landing creates compression that settles over time", () => {
+test("landing creates compression that builds, then settles over time", () => {
   let state = createRiderState({ air: 0.05, verticalVelocity: -4 });
-  state = stepRider(state, {}, 0.05);
-  const landingCompression = state.compression;
+  state = stepRider(state, {}, 1 / 120);
+  const atTouchdown = state.compression;
+  let deepest = 0;
 
+  for (let frame = 0; frame < 18; frame += 1) {
+    state = stepRider(state, {}, 1 / 120);
+    deepest = Math.max(deepest, state.compression);
+  }
   for (let frame = 0; frame < 60; frame += 1) {
     state = stepRider(state, {}, 1 / 60);
   }
 
-  assert.ok(landingCompression > 0.5 && state.compression < landingCompression);
+  assert.ok(atTouchdown < 0.15, `compression was ${atTouchdown} on the touchdown step`);
+  assert.ok(deepest > 0.3 && state.compression < deepest * 0.5);
 });
 
 test("releasing the edge preserves cross-slope momentum", () => {
@@ -391,17 +420,19 @@ test("tucking increases a locked airborne spin rate", () => {
 });
 
 test("air controls allow a small spin correction and an up-arrow stretch", () => {
-  let neutral = createRiderState({ air: 1, speed: 18, spinVelocity: 1.5 });
+  let neutral = createRiderState({ air: 1, speed: 18, spinVelocity: 1.5,
+    stanceHeight: 0.45, crouchAmount: 1 });
   let corrected = neutral;
   let stretched = neutral;
 
-  for (let frame = 0; frame < 30; frame += 1) {
+  for (let frame = 0; frame < 20; frame += 1) {
     neutral = stepRider(neutral, {}, 1 / 60);
     corrected = stepRider(corrected, { carve: 1 }, 1 / 60);
     stretched = stepRider(stretched, { stretch: 1 }, 1 / 60);
   }
 
   assert.ok(
+    neutral.air > 0 && corrected.air > 0 && stretched.air > 0 &&
     corrected.spinVelocity > neutral.spinVelocity &&
       Math.abs(stretched.boardYaw) < Math.abs(neutral.boardYaw),
   );
@@ -424,7 +455,7 @@ test("landing sideways catches an edge", () => {
   const state = stepRider(
     createRiderState({
       air: 0.03,
-      boardYaw: 0.8,
+      boardYaw: 1.3,
       velocity: { across: 0, downhill: 14 },
       verticalVelocity: -3,
     }),
@@ -642,4 +673,73 @@ test("crouched steering loads a grounded butter press", () => {
   }
 
   assert.ok(state.butter > 0.5);
+});
+
+const mountain = (state, surface) => ({
+  lipDistance: sideHitLipDistance(state.position.across, state.position.downhill),
+  surface,
+  surfaceHeight: snowSurfaceHeight,
+  surfaceNormal: snowSurfaceNormal,
+});
+
+test("a surface change under the board does not launch or slam the rider", () => {
+  let state = createRiderState({ speed: 22, surface: "powder" });
+  for (let frame = 0; frame < 60; frame += 1) {
+    state = stepRider(state, {}, 1 / 120, mountain(state, "powder"));
+  }
+  assert.equal(state.grounded, true);
+
+  for (let frame = 0; frame < 60; frame += 1) {
+    const before = state;
+    state = stepRider(state, {}, 1 / 120, mountain(state, "ice"));
+    if (frame < 10) {
+      assert.equal(state.air, 0, `left the snow ${frame} steps after the change`);
+      assert.ok(Math.abs(state.legOffset) <= LEG_REACH);
+      assert.ok(Math.abs(state.worldHeight - before.worldHeight) < 0.15,
+        `the body jumped ${(state.worldHeight - before.worldHeight).toFixed(2)} m`);
+      assert.ok(state.load < 3, `the change loaded the legs to ${state.load.toFixed(1)} g`);
+    }
+  }
+  assert.equal(state.crashed, false);
+});
+
+test("a hazard hit in the air recovers on the snow with neutral legs", () => {
+  const level = {
+    slopeGrade: 0.2,
+    surface: "groomed",
+    surfaceHeight: () => 0,
+    surfaceNormal: () => ({ x: 0, y: 1, z: 0 }),
+  };
+  let state = crashRiderOnHazard(createRiderState({
+    air: 2,
+    grounded: false,
+    speed: 20,
+    worldHeight: 2,
+    worldVerticalVelocity: 3,
+  }), { kind: "jump", x: 0 });
+
+  for (let frame = 0; frame < 264; frame += 1) {
+    state = stepRider(state, {}, 1 / 120, level);
+    assert.equal(state.air, 0);
+    assert.equal(state.grounded, true);
+  }
+
+  assert.equal(state.crashed, false);
+  assert.ok(Math.abs(state.legOffset) < 0.05, `legs left at ${state.legOffset}`);
+  assert.ok(Math.abs(state.worldHeight) < 0.05, `body left at ${state.worldHeight} m`);
+});
+
+test("a stalled frame or an empty one leaves the rider in one piece", () => {
+  let state = createRiderState({ speed: 24, surface: "powder" });
+  for (let frame = 0; frame < 240; frame += 1) {
+    const delta = frame % 7 === 0 ? 0.1 : frame % 5 === 0 ? 0 : 1 / 60;
+    state = stepRider(state, { jump: Number(frame === 100) }, delta, mountain(state, "powder"));
+    for (const value of [state.air, state.legOffset, state.load, state.worldHeight,
+      state.worldVerticalVelocity, state.speed, state.compression]) {
+      assert.ok(Number.isFinite(value));
+    }
+    assert.ok(state.air >= 0);
+    assert.ok(state.worldHeight - snowSurfaceHeight(state.position.across,
+      state.position.downhill, "powder") >= -LEG_COMPRESS - 1e-6);
+  }
 });
