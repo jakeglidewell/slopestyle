@@ -12,6 +12,7 @@ const SCORE_STORAGE_KEY = "slopestyle.bestScore";
 const START_SPEED = 16;
 const MAX_SPEED = 44;
 const HIT_WINDOW = 1.25;
+const BOULDER_RADIUS = 1.15;
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -27,11 +28,22 @@ export const courseSpeedForRider = (riderState) => {
       downhillSpeed);
 };
 
-export const syncHazardsToRider = (hazards, riderDownhill) =>
-  hazards.map((hazard) => ({
-    ...hazard,
-    z: hazard.worldDownhill - riderDownhill,
-  }));
+export const riderOutsideCourse = (riderState) =>
+  Math.abs(riderState?.position?.across ?? 0) > COURSE.halfWidth;
+
+export const syncHazardsToRider = (hazards, riderDownhill, delta = 0) =>
+  hazards.map((hazard) => {
+    const z = hazard.worldDownhill - riderDownhill;
+    if (hazard.variant !== "rolling-boulder") return { ...hazard, z };
+
+    const lateralTravel = hazard.acrossSpeed * delta;
+    return {
+      ...hazard,
+      x: hazard.x + lateralTravel,
+      z,
+      roll: hazard.roll + lateralTravel / hazard.radius,
+    };
+  });
 
 export const hazardHitsRider = (hazard, riderState, input = {}) => {
   if (hazard.passed || Math.abs(hazard.z) > HIT_WINDOW) return false;
@@ -45,6 +57,9 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
     const halfSpan = hazard.variant === "bird" ? 0.86 : 0.88;
     return lateralGap < (hazard.radius ?? COURSE.halfWidth * halfSpan) &&
       (Number(input.crouch) || 0) < 0.75;
+  }
+  if (hazard.variant === "rolling-boulder") {
+    return air < hazard.radius * 1.85 && lateralGap < hazard.radius;
   }
   return air < 0.35 && lateralGap < 1.05;
 };
@@ -280,10 +295,31 @@ const createHud = (root) => {
   });
 };
 
-const spawnHazard = (state, riderDownhill) => {
+const spawnHazard = (state, riderDownhill, courseSpeed) => {
+  const worldDownhill = riderDownhill + COURSE.spawnDistance;
+  if (state.nextHazardId === state.nextBoulderId) {
+    state.nextBoulderId += 5 + Math.floor(Math.random() * 3);
+    const direction = Math.random() < 0.5 ? 1 : -1;
+    const x = -direction * COURSE.halfWidth * 0.86;
+    const crossingX = direction * randomBetween(0.15, 1.5);
+    // Time the crossing near the center of the run at the rider's current pace.
+    const acrossSpeed = (crossingX - x) * courseSpeed / COURSE.spawnDistance;
+    return {
+      id: state.nextHazardId,
+      kind: "steer",
+      passed: false,
+      variant: "rolling-boulder",
+      radius: BOULDER_RADIUS,
+      acrossSpeed,
+      roll: 0,
+      worldDownhill,
+      x,
+      z: COURSE.spawnDistance,
+    };
+  }
+
   const actionRoll = Math.random();
   let kind = "steer";
-  const worldDownhill = riderDownhill + COURSE.spawnDistance;
   const sideHit = sideHitFeatureAt(Math.max(0,
     Math.round((worldDownhill - SIDE_HIT_FIRST_LIP) / SIDE_HIT_SPACING)));
   const clearSideHit = worldDownhill >= sideHit.start - 4 &&
@@ -357,6 +393,7 @@ const emptyRunState = (best, bestScore = 0) => ({
   hazards: [],
   lastLane: -1,
   lastRiderDownhill: 0,
+  nextBoulderId: 4 + Math.floor(Math.random() * 3),
   nextHazardId: 1,
   phase: "idle",
   spawnLeft: 12,
@@ -461,6 +498,7 @@ export default async function setupGameLoop(game) {
     audio.stopRide();
 
     if (reason === "cliff") {
+      game.events.dispatchEvent(new CustomEvent("rider:impact", { detail: hazard }));
       state.phase = "falling";
       state.fallTimer = 1.35;
       audio.fall();
@@ -488,9 +526,8 @@ export default async function setupGameLoop(game) {
     state.lastRiderDownhill = riderDownhill;
     audio.ride(riderState);
 
-    if (Math.abs(riderState.position.across) >
-        (game.runtime?.world3d ? 38 : COURSE.halfWidth)) {
-      endRun("cliff");
+    if (riderOutsideCourse(riderState)) {
+      endRun("cliff", { kind: "course-edge", x: riderState.position.across });
       return;
     }
 
@@ -505,8 +542,9 @@ export default async function setupGameLoop(game) {
     state.trickNoticeTimer = Math.max(0, state.trickNoticeTimer - delta);
     state.spawnLeft -= downhillProgress;
 
+    state.hazards = syncHazardsToRider(state.hazards, riderDownhill, delta);
     if (state.spawnLeft <= 0) {
-      const hazard = spawnHazard(state, riderDownhill);
+      const hazard = spawnHazard(state, riderDownhill, courseSpeed);
       if (hazard) {
         state.hazards.push(hazard);
         state.nextHazardId += 1;
@@ -514,7 +552,6 @@ export default async function setupGameLoop(game) {
       state.spawnLeft = nextSpawnDistance(state.speed);
     }
 
-    state.hazards = syncHazardsToRider(state.hazards, riderDownhill);
     for (const hazard of state.hazards) {
       if (hazardHitsRider(hazard, riderState, input)) {
         endRun("hazard", hazard);

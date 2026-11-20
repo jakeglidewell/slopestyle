@@ -1,7 +1,7 @@
 import * as THREE from "../vendor/three/three.module.js";
 import { createRiderModel } from "../rider/model3d.js";
 import { createSnowTrackTrail } from "../rider/renderer.js";
-import { CHUNK_LENGTH, visibleSlopeChunks } from "./course.js";
+import { CHUNK_LENGTH, COURSE_HALF_WIDTH, visibleSlopeChunks } from "./course.js";
 import {
   SIDE_HIT_FIRST_LIP,
   SIDE_HIT_SPACING,
@@ -15,7 +15,7 @@ import {
 const TERRAIN_LENGTH = 36;
 const TERRAIN_AHEAD = 246;
 const TERRAIN_BEHIND = 24;
-const HALF_WIDTH = 9.5;
+const HALF_WIDTH = COURSE_HALF_WIDTH;
 const terrainMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
   roughness: 0.98,
@@ -34,6 +34,14 @@ const flagMaterial = new THREE.MeshStandardMaterial({ color: 0xd96c50, roughness
   side: THREE.DoubleSide, flatShading: true });
 const landingFlagMaterial = new THREE.MeshStandardMaterial({ color: 0x3d8793, roughness: 0.86,
   side: THREE.DoubleSide, flatShading: true });
+const edgeBaseMaterial = new THREE.MeshBasicMaterial({
+  color: 0x79adb8, opacity: 0.65, transparent: true, depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const edgeWhiteMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff, opacity: 0.9, transparent: true, depthWrite: false,
+  side: THREE.DoubleSide,
+});
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -176,6 +184,33 @@ const makeSnowGrooves = (index) => {
   return lines;
 };
 
+const makeCourseEdgeRibbon = (index, width, lift, material) => {
+  const vertices = [];
+  for (const side of [-1, 1]) {
+    for (let step = 0; step < 12; step += 1) {
+      const near = index * TERRAIN_LENGTH + step * 3;
+      const far = near + 3;
+      const left = side * HALF_WIDTH - width / 2;
+      const right = side * HALF_WIDTH + width / 2;
+      const a = [left, snowSurfaceHeight(left, near) + lift, -near];
+      const b = [right, snowSurfaceHeight(right, near) + lift, -near];
+      const c = [left, snowSurfaceHeight(left, far) + lift, -far];
+      const d = [right, snowSurfaceHeight(right, far) + lift, -far];
+      vertices.push(...a, ...b, ...c, ...b, ...d, ...c);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  const ribbon = new THREE.Mesh(geometry, material);
+  ribbon.frustumCulled = false;
+  return ribbon;
+};
+
+const makeCourseEdges = (index) => [
+  makeCourseEdgeRibbon(index, 0.34, 0.025, edgeBaseMaterial),
+  makeCourseEdgeRibbon(index, 0.16, 0.03, edgeWhiteMaterial),
+];
+
 const makePine = (size = 1) => {
   const tree = new THREE.Group();
   const height = 3.9 * size;
@@ -207,6 +242,15 @@ const makeRock = (size = 1) => {
     snowMaterial, rock, -0.1 * size, 0.96 * size, -0.1 * size);
   snow.rotation.z = -0.18;
   return rock;
+};
+
+const makeRollingBoulder = (radius) => {
+  const boulder = new THREE.Group();
+  solid(new THREE.DodecahedronGeometry(radius, 0), rockMaterial, boulder);
+  const snow = solid(new THREE.DodecahedronGeometry(radius * 0.43, 0),
+    snowMaterial, boulder, -radius * 0.13, radius * 0.74, radius * 0.12);
+  snow.scale.y = 0.65;
+  return boulder;
 };
 
 const makeFallenLog = () => {
@@ -243,6 +287,7 @@ const makeLowBranch = () => {
 const makeHazard = (hazard) => {
   if (hazard.kind === "jump") return makeFallenLog();
   if (hazard.kind === "duck") return makeLowBranch();
+  if (hazard.variant === "rolling-boulder") return makeRollingBoulder(hazard.radius);
   return hazard.variant === "rock" ? makeRock(1.15) : makePine(1.25);
 };
 
@@ -415,15 +460,17 @@ export function createMountainWorld(canvas) {
       if (terrain.has(index)) continue;
       const chunk = makeTerrain(index);
       const grooves = makeSnowGrooves(index);
-      scene.add(chunk.mesh, grooves);
-      terrain.set(index, { ...chunk, grooves });
+      const edges = makeCourseEdges(index);
+      scene.add(chunk.mesh, grooves, ...edges);
+      terrain.set(index, { ...chunk, grooves, edges });
     }
     for (const [index, chunk] of terrain) {
       if (index >= first && index <= last) continue;
-      scene.remove(chunk.mesh, chunk.grooves);
+      scene.remove(chunk.mesh, chunk.grooves, ...chunk.edges);
       chunk.mesh.geometry.dispose();
       chunk.grooves.geometry.dispose();
       chunk.grooves.material.dispose();
+      for (const edge of chunk.edges) edge.geometry.dispose();
       terrain.delete(index);
     }
   };
@@ -568,16 +615,24 @@ export function createMountainWorld(canvas) {
   const updateHazards = () => {
     const active = new Set(course.hazards.map((hazard) => hazard.id));
     for (const hazard of course.hazards) {
-      if (hazardMeshes.has(hazard.id)) continue;
-      const mesh = makeHazard(hazard);
-      mesh.position.set(hazard.x, snowSurfaceHeight(hazard.x, hazard.worldDownhill),
-        -hazard.worldDownhill);
-      scene.add(mesh);
-      hazardMeshes.set(hazard.id, mesh);
+      const rolling = hazard.variant === "rolling-boulder";
+      let mesh = hazardMeshes.get(hazard.id);
+      if (!mesh) {
+        mesh = makeHazard(hazard);
+        scene.add(mesh);
+        hazardMeshes.set(hazard.id, mesh);
+      } else if (!rolling) {
+        continue;
+      }
+      const lift = rolling ? hazard.radius * 0.93 : 0;
+      const ground = snowSurfaceHeight(hazard.x, hazard.worldDownhill);
+      mesh.position.set(hazard.x, ground + lift, -hazard.worldDownhill);
+      if (rolling) mesh.rotation.z = -hazard.roll;
     }
     for (const [id, mesh] of hazardMeshes) {
       if (active.has(id)) continue;
       scene.remove(mesh);
+      mesh.traverse((object) => object.geometry?.dispose());
       hazardMeshes.delete(id);
     }
   };

@@ -1,5 +1,5 @@
 import { baseSlopeHeightAt, sampleSnowTerrain } from "../rider/physics.js";
-import { courseReliefAt } from "./course.js";
+import { COURSE_HALF_WIDTH, courseReliefAt } from "./course.js";
 
 const finiteOr = (value, fallback = 0) =>
   Number.isFinite(value) ? value : fallback;
@@ -99,7 +99,7 @@ function baseSnowSurfaceHeight(across, downhill, surface = "powder") {
   const x = finiteOr(across);
   const d = finiteOr(downhill);
   const grade = baseSlopeHeightAt(d);
-  const shoulder = Math.max(0, Math.abs(x) - 9.5);
+  const shoulder = Math.max(0, Math.abs(x) - COURSE_HALF_WIDTH);
   const bank = shoulder ** 1.8 * 0.021 +
     Math.sin(d * 0.065 + x * 0.12) * shoulder * 0.025;
   const broadRoll = Math.sin(d * 0.075 + x * 0.095) * 0.22 +

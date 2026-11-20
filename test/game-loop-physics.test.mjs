@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   courseSpeedForRider,
   hazardHitsRider,
+  riderOutsideCourse,
   syncHazardsToRider,
 } from "../src/game-loop/index.js";
 
@@ -26,6 +27,12 @@ test("a crashed rider can still come to a stop", () => {
   assert.equal(courseSpeedForRider(uphillRider), 0);
 });
 
+test("crossing either marked course edge ends the run before the scenery trees", () => {
+  assert.equal(riderOutsideCourse({ position: { across: 9.5 } }), false);
+  assert.equal(riderOutsideCourse({ position: { across: 9.6 } }), true);
+  assert.equal(riderOutsideCourse({ position: { across: -9.6 } }), true);
+});
+
 test("hazards move with actual downhill progress, not score speed", () => {
   const fixedHazard = [{ id: 1, worldDownhill: 44, z: 44 }];
   const atFive = syncHazardsToRider(fixedHazard, 5);
@@ -36,6 +43,26 @@ test("hazards move with actual downhill progress, not score speed", () => {
   assert.equal(stillAtFive[0].z, 39);
   assert.equal(atEight[0].z, 36);
   assert.equal(atEight[0].worldDownhill, 44);
+});
+
+test("rolling boulders spin and collide at their current position", () => {
+  const boulder = {
+    kind: "steer", variant: "rolling-boulder", worldDownhill: 30,
+    acrossSpeed: 4, radius: 1, roll: 0, x: -2,
+  };
+  const rider = { position: { across: 0 }, air: 0 };
+  const [approaching] = syncHazardsToRider([boulder], 28, 0.5);
+  assert.equal(approaching.x, 0);
+  assert.equal(approaching.roll, 2);
+  assert.equal(hazardHitsRider(approaching, rider), false);
+
+  const [crossing] = syncHazardsToRider([approaching], 30, 0.125);
+  assert.equal(hazardHitsRider(crossing, rider), true);
+
+  const [clear] = syncHazardsToRider([crossing], 30, 0.5);
+  assert.equal(clear.x, 2.5);
+  assert.equal(clear.z, 0);
+  assert.equal(hazardHitsRider(clear, rider), false);
 });
 
 test("an overhead or jump obstacle only hits within its visible span", () => {
