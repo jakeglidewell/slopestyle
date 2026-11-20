@@ -82,11 +82,13 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
 const randomBetween = (minimum, maximum) =>
   minimum + Math.random() * (maximum - minimum);
 
-const getStoredNumber = (key) => {
+const getStoredNumber = (key, fallback = 0) => {
   try {
-    return Math.max(0, Number(localStorage.getItem(key)) || 0);
+    const stored = localStorage.getItem(key);
+    const value = Number(stored);
+    return stored !== null && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
   } catch {
-    return 0;
+    return fallback;
   }
 };
 
@@ -114,6 +116,16 @@ const addInterfaceStyles = () => {
     .hud-label { display: block; color: rgba(238, 248, 249, 0.68); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
     .hud-value { display: block; margin-top: 4px; color: #f7faf9; font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
     .hud-unit { margin-left: 3px; font-size: 0.75rem; font-weight: 600; opacity: 0.68; }
+    .high-score-card { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+    .high-score-celebration { position: fixed; inset: 0; overflow: hidden; }
+    .high-score-banner { position: absolute; top: 24%; left: 0; right: 0; text-align: center; color: #fff0a4; font-size: clamp(2rem, 8vw, 5rem); font-weight: 800; text-shadow: 0 2px 12px #172b36; animation: high-score-flash 500ms ease-in-out 3; }
+    .high-score-confetti { position: absolute; top: -16px; left: var(--left); width: 8px; height: 13px; background: var(--color); animation: confetti-fall var(--duration) var(--delay) ease-in both; }
+    @keyframes high-score-flash { 50% { opacity: 0.5; } }
+    @keyframes confetti-fall { to { transform: translate(var(--drift), 105vh) rotate(var(--spin)); } }
+    @media (prefers-reduced-motion: reduce) {
+      .high-score-banner { animation: none; }
+      .high-score-confetti { display: none; }
+    }
     #overlay-root { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: none; }
     .overlay-panel { width: min(540px, 92vw); border: 1px solid rgba(234, 247, 248, 0.16); border-radius: 6px; padding: clamp(26px, 4vw, 42px); background: rgba(18, 39, 49, 0.82); box-shadow: 0 22px 75px rgba(17, 36, 46, 0.28); backdrop-filter: blur(18px); text-align: left; pointer-events: auto; }
     .overlay-panel h1 { margin: 0 0 12px; font-size: clamp(2.6rem, 6vw, 4.2rem); font-weight: 680; line-height: 0.96; letter-spacing: -0.055em; color: #f5f8f6; }
@@ -291,13 +303,38 @@ const createHud = (root) => {
       <strong class="hud-value" data-score>0</strong>
     </div>
     <div class="trick-callout is-hidden" data-trick></div>
+    <div class="hud-card high-score-card" data-high-score-card hidden>
+      <span class="hud-label">High score</span>
+      <strong class="hud-value" data-high-score></strong>
+    </div>
+    <div class="high-score-celebration" data-celebration></div>
   `;
 
+  const highScoreCard = root.querySelector("[data-high-score-card]");
+  const highScoreValue = root.querySelector("[data-high-score]");
+  const celebration = root.querySelector("[data-celebration]");
+  let celebrationTimer;
+
   return Object.freeze({
-    update({ distance, score, speed, trickNotice, trickNoticeTimer }) {
+    celebrateHighScore() {
+      const colors = ["#fff0a4", "#ff9e80", "#a4e8e0", "#c3b5ff"];
+      celebration.innerHTML = `<div class="high-score-banner" role="status">HIGH SCORE</div>
+        ${Array.from({ length: 32 }, (_, index) => {
+          const left = (index * 37) % 100;
+          const drift = (index * 53) % 181 - 90;
+          const spin = index % 2 ? 540 : -420;
+          return `<span aria-hidden="true" class="high-score-confetti" style="--left:${left}%;--drift:${drift}px;--spin:${spin}deg;--color:${colors[index % colors.length]};--duration:${1.5 + (index % 7) * 0.1}s;--delay:${(index % 9) * 0.05}s"></span>`;
+        }).join("")}`;
+      window.clearTimeout(celebrationTimer);
+      celebrationTimer = window.setTimeout(() => { celebration.replaceChildren(); }, 2600);
+    },
+    update({ bestScore, distance, phase, score, speed, trickNotice, trickNoticeTimer }) {
       root.querySelector("[data-distance]").textContent = `${Math.floor(distance)} m`;
       root.querySelector("[data-speed]").innerHTML = `${Math.round(speed * 3.6)}<span class="hud-unit">km/h</span>`;
       root.querySelector("[data-score]").textContent = String(Math.floor(score));
+      highScoreCard.hidden = phase !== "running" || bestScore === null;
+      const highScore = String(bestScore ?? 0);
+      if (highScoreValue.textContent !== highScore) highScoreValue.textContent = highScore;
       const notice = root.querySelector("[data-trick]");
       notice.classList.toggle("is-hidden", !trickNotice || trickNoticeTimer <= 0);
       if (trickNotice && trickNoticeTimer > 0) {
@@ -401,9 +438,10 @@ export const spawnHazard = (state, riderDownhill, courseSpeed, riderAcross = 0,
 const nextSpawnDistance = (speed) =>
   randomBetween(clamp(40 - speed * 0.25, 28, 40), clamp(58 - speed * 0.35, 37, 55));
 
-const emptyRunState = (best, bestScore = 0) => ({
+const emptyRunState = (best, bestScore) => ({
   best,
   bestScore,
+  celebratedHighScore: false,
   crashFx: 0,
   distance: 0,
   score: 0,
@@ -428,7 +466,7 @@ export default async function setupGameLoop(game) {
 
   const audio = createAudioController();
   const hud = createHud(game.hudRoot);
-  let state = emptyRunState(getStoredNumber(STORAGE_KEY), getStoredNumber(SCORE_STORAGE_KEY));
+  let state = emptyRunState(getStoredNumber(STORAGE_KEY), getStoredNumber(SCORE_STORAGE_KEY, null));
   let lastFrameAt;
   let lastJumpValue = 0;
   let previousRiderState;
@@ -511,11 +549,20 @@ export default async function setupGameLoop(game) {
     audio.startRide();
   };
 
+  const updateHighScore = () => {
+    if (state.score <= (state.bestScore ?? 0)) return;
+    state.bestScore = state.score;
+    if (state.celebratedHighScore) return;
+    state.celebratedHighScore = true;
+    hud.celebrateHighScore();
+  };
+
   const endRun = (reason, hazard) => {
     state.finalDistance = state.distance;
     state.crashFx = 0.8;
     state.best = Math.max(state.best, Math.floor(state.distance));
-    state.bestScore = Math.max(state.bestScore, Math.floor(state.score));
+    updateHighScore();
+    state.bestScore ??= state.score;
     setStoredNumber(STORAGE_KEY, state.best);
     setStoredNumber(SCORE_STORAGE_KEY, state.bestScore);
     audio.stopRide();
@@ -598,9 +645,8 @@ export default async function setupGameLoop(game) {
       state.score = Math.floor(state.distance) + state.trickPoints;
       state.trickNotice = scoreResult.award;
       state.trickNoticeTimer = 1.9;
-      state.bestScore = Math.max(state.bestScore, state.score);
-      setStoredNumber(SCORE_STORAGE_KEY, state.bestScore);
     }
+    if (state.bestScore !== null) updateHighScore();
   };
 
   const updateFalling = (delta) => {
