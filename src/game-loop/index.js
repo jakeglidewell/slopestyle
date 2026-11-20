@@ -116,7 +116,13 @@ const addInterfaceStyles = () => {
     .hud-label { display: block; color: rgba(238, 248, 249, 0.68); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
     .hud-value { display: block; margin-top: 4px; color: #f7faf9; font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
     .hud-unit { margin-left: 3px; font-size: 0.75rem; font-weight: 600; opacity: 0.68; }
-    .high-score-card { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+    .high-score-guide { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); width: min(480px, 54vw); transform: translateX(-50%); color: #f7faf9; }
+    .high-score-guide[hidden] { display: none; }
+    .high-score-guide-label { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-shadow: 0 2px 8px #172b36; text-transform: uppercase; }
+    .high-score-guide-track { position: relative; height: 4px; border-radius: 4px; background: rgba(247, 250, 249, 0.5); box-shadow: 0 1px 7px #172b36; }
+    .high-score-guide-fill { display: block; width: var(--progress); height: 100%; border-radius: inherit; background: #fff0a4; }
+    .high-score-guide-marker { position: absolute; top: 50%; right: 0; width: 4px; height: 18px; transform: translateY(-50%); border-radius: 2px; background: #fff0a4; box-shadow: 0 0 8px #fff0a4; }
+    .high-score-guide.is-passed .high-score-guide-track { background: #fff0a4; box-shadow: 0 0 12px #fff0a4; }
     .high-score-celebration { position: fixed; inset: 0; overflow: hidden; }
     .high-score-banner { position: absolute; top: 24%; left: 0; right: 0; text-align: center; color: #fff0a4; font-size: clamp(2rem, 8vw, 5rem); font-weight: 800; text-shadow: 0 2px 12px #172b36; animation: high-score-flash 500ms ease-in-out 3; }
     .high-score-confetti { position: absolute; top: -16px; left: var(--left); width: 8px; height: 13px; background: var(--color); animation: confetti-fall var(--duration) var(--delay) ease-in both; }
@@ -141,7 +147,7 @@ const addInterfaceStyles = () => {
     .fall-callout { border: 0; background: transparent; box-shadow: none; color: white; text-align: center; animation: fallaway 1.35s ease-in forwards; }
     .fall-callout h1 { font-size: clamp(2.6rem, 7vw, 5rem); }
     .is-hidden { display: none !important; }
-    @media (max-width: 560px) { #hud-root { inset: 12px 12px auto 12px; } .hud-card { min-width: 90px; padding: 8px 10px; } .overlay-panel { padding: 25px; } }
+    @media (max-width: 560px) { #hud-root { inset: 12px 12px auto 12px; } .hud-card { min-width: 90px; padding: 8px 10px; } .high-score-guide { width: calc(100vw - 32px); } .overlay-panel { padding: 25px; } }
     @keyframes fallaway {
       0% { opacity: 1; transform: translateY(-8vh) scale(1); }
       100% { opacity: 0; transform: translateY(28vh) scale(0.34); }
@@ -303,14 +309,17 @@ const createHud = (root) => {
       <strong class="hud-value" data-score>0</strong>
     </div>
     <div class="trick-callout is-hidden" data-trick></div>
-    <div class="hud-card high-score-card" data-high-score-card hidden>
-      <span class="hud-label">High score</span>
-      <strong class="hud-value" data-high-score></strong>
+    <div class="high-score-guide" data-high-score-guide hidden>
+      <div class="high-score-guide-label"><span data-high-score-label>High score</span><span data-high-score></span></div>
+      <div class="high-score-guide-track" aria-hidden="true">
+        <span class="high-score-guide-fill"></span><span class="high-score-guide-marker"></span>
+      </div>
     </div>
     <div class="high-score-celebration" data-celebration></div>
   `;
 
-  const highScoreCard = root.querySelector("[data-high-score-card]");
+  const highScoreGuide = root.querySelector("[data-high-score-guide]");
+  const highScoreLabel = root.querySelector("[data-high-score-label]");
   const highScoreValue = root.querySelector("[data-high-score]");
   const celebration = root.querySelector("[data-celebration]");
   let celebrationTimer;
@@ -328,13 +337,18 @@ const createHud = (root) => {
       window.clearTimeout(celebrationTimer);
       celebrationTimer = window.setTimeout(() => { celebration.replaceChildren(); }, 2600);
     },
-    update({ bestScore, distance, phase, score, speed, trickNotice, trickNoticeTimer }) {
+    update({ distance, phase, runHighScore, score, speed, trickNotice, trickNoticeTimer }) {
       root.querySelector("[data-distance]").textContent = `${Math.floor(distance)} m`;
       root.querySelector("[data-speed]").innerHTML = `${Math.round(speed * 3.6)}<span class="hud-unit">km/h</span>`;
       root.querySelector("[data-score]").textContent = String(Math.floor(score));
-      highScoreCard.hidden = phase !== "running" || bestScore === null;
-      const highScore = String(bestScore ?? 0);
+      highScoreGuide.hidden = phase !== "running" || runHighScore === null;
+      const passedHighScore = runHighScore !== null && score > runHighScore;
+      const highScore = String(runHighScore ?? 0);
+      highScoreLabel.textContent = passedHighScore ? "New high score" : "High score";
       if (highScoreValue.textContent !== highScore) highScoreValue.textContent = highScore;
+      highScoreGuide.style.setProperty("--progress", `${runHighScore > 0
+        ? Math.min(100, score / runHighScore * 100) : passedHighScore ? 100 : 0}%`);
+      highScoreGuide.classList.toggle("is-passed", passedHighScore);
       const notice = root.querySelector("[data-trick]");
       notice.classList.toggle("is-hidden", !trickNotice || trickNoticeTimer <= 0);
       if (trickNotice && trickNoticeTimer > 0) {
@@ -441,6 +455,7 @@ const nextSpawnDistance = (speed) =>
 const emptyRunState = (best, bestScore) => ({
   best,
   bestScore,
+  runHighScore: bestScore,
   celebratedHighScore: false,
   crashFx: 0,
   distance: 0,
