@@ -231,3 +231,16 @@ test("a fallen tree's boughs lie along the hill, neither buried uphill nor float
       `${side} boughs sit ${Math.min(...clearances).toFixed(2)} to ${Math.max(...clearances).toFixed(2)} m off the snow`);
   }
 });
+
+test("a held crouch gets the rider under a full-width duck log, and standing does not", () => {
+  const ducked = helmetTop({ crouch: 1 });
+  const riding = helmetTop({ crouch: 0.3 });
+  const log = makeHazard({ id: 3, kind: "duck", variant: "full-width-log", radius: 12, x: 0 });
+  for (const across of [-8, -2, 0, 5]) {
+    // (A little off the log's centre line, where a ray could slip along a facet's edge.)
+    const underside = probe(log, [across + 0.13, 0.02, 0.07], UP);
+    assert.ok(underside && underside.y > ducked + 0.05 && underside.y < riding,
+      `${across} m across, the log hangs ${underside?.y.toFixed(2)} m up; a ducked helmet is at ` +
+      `${ducked.toFixed(2)} m, a riding one at ${riding.toFixed(2)} m`);
+  }
+});

@@ -6,6 +6,10 @@ import { createRiderRenderer } from "./renderer.js";
 import { sideHitLipDistance, snowSurfaceHeight } from "../mountain/terrain3d.js";
 
 const PHYSICS_STEP = 1 / 120;
+// Once the run is over the rider stays down: the crash is played until this much
+// of its recovery is left (they are flat and have slid to a stop by then), and
+// held there instead of getting up and riding away behind the end screen.
+const STAY_DOWN = 1;
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
 
@@ -68,6 +72,15 @@ export default async function setupRider(game) {
   let paceTarget = 0;
   let previousTimestamp;
   let state = createRiderState({ surface: environment.surface });
+  // What the run is doing, as the course last reported it: "idle" on the menu,
+  // "running", "falling", or "crashed" once it has ended. Unknown means riding.
+  let phase;
+  // Seconds spent waiting on the menu: time still passes for a rider standing still.
+  let waited = 0;
+
+  game.events.addEventListener("course:update", (event) => {
+    phase = event.detail?.phase;
+  });
 
   game.events.addEventListener("rider:input", (event) => {
     if (Number(event.detail?.jump) > 0) queuedExternalJump = true;
@@ -149,8 +162,14 @@ export default async function setupRider(game) {
       pendingPace = undefined;
     }
     const wasCrashed = state.crashed;
-    pendingJump = Math.max(pendingJump, input.jump);
-    const physics = planPhysicsSteps(deltaSeconds);
+    // The rider only rides while a run is on. On the menu they wait at the top;
+    // once the run has ended they go down, slide to a stop, and stay there.
+    const waiting = phase === "idle";
+    const over = phase === "crashed" && (!state.crashed || state.crashTimer <= STAY_DOWN);
+    waited = waiting ? waited + deltaSeconds : 0;
+    pendingJump = waiting || over ? 0 : Math.max(pendingJump, input.jump);
+    const physics = waiting || over
+      ? Object.freeze({ count: 0, step: 0 }) : planPhysicsSteps(deltaSeconds);
     let launched = 0;
     for (let index = 0; index < physics.count; index += 1) {
       launched = Math.max(launched, pendingJump);
@@ -180,8 +199,11 @@ export default async function setupRider(game) {
         );
       }
     }
+    // Waiting, the rider is shown standing still: the same place, no speed.
+    const shown = () => (waiting ? createRiderState({ ...state, elapsed: state.elapsed + waited,
+      speed: 0, velocity: { across: 0, downhill: 0 } }) : state);
     camera = stepCamera(camera, state, deltaSeconds, cameraTerrain);
-    let pose = animator.step(state, frameInput, deltaSeconds);
+    let pose = animator.step(shown(), frameInput, deltaSeconds);
 
     const warning = clamp((state.impactMeter - 70) / 30, 0, 1);
     const colorEffect = warning > 0
@@ -200,16 +222,16 @@ export default async function setupRider(game) {
           camera,
           input: frameInput,
           pose,
-          state,
+          state: shown(),
         }),
       }),
     );
 
     if (state !== stateBeforeEvents) {
-      pose = animator.step(state, frameInput, 0);
+      pose = animator.step(shown(), frameInput, 0);
     }
 
-    renderer.draw({ camera, pose, state });
+    renderer.draw({ camera, pose, state: shown() });
 
     requestAnimationFrame(update);
   };

@@ -92,6 +92,34 @@ export function getRiderPose(state, input = {}) {
     ? clamp((crashAge - 0.55) / 0.4, 0, 1) *
       (1 - clamp((crashAge - 1.35) / 0.5, 0, 1))
     : 0;
+  // Going down, sliding, and getting back up: 1 is flat on the snow.
+  const ease = (share) => {
+    const t = clamp(share, 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const fall = !state.crashed ? 0
+    : crashAge < 0.24 ? ease(crashAge / 0.24)
+      : crashAge < 1.05 ? 1
+        : crashAge < 1.45 ? 1 - ease((crashAge - 1.05) / 0.4) * 0.5
+          : (1 - ease((crashAge - 1.45) / 0.5)) * 0.5;
+  // Which way the rider's chest faces across the hill: toward +across riding
+  // regular, the other way riding switch.
+  const chestSide = state.switchRiding ? -1 : 1;
+  const thrown = Math.sign(finiteOr(state.crashSpin)) || 1;
+  // Legs that give out sit the rider down. Hitting something throws them forward.
+  // Catching an edge throws them over it: onto the chest if that is the way the
+  // chest faces, onto the back if not.
+  const fallKind = !state.crashed ? ""
+    : state.crashReason === "impact-overload" ? "sit"
+      : state.crashReason === "hazard" || thrown === chestSide ? "front" : "back";
+  const travel = finiteOr(state.heading);
+  // The physics spins the board through a crash; a rider going down takes the
+  // board with them, so the pose holds it where it was and squares it up again
+  // as they stand.
+  const heldBoardYaw = finiteOr(state.boardYaw, travel) - thrown * 2.3 * crashAge;
+  const squareBoardYaw = travel + (state.switchRiding ? Math.PI : 0);
+  const crashBoardYaw = heldBoardYaw +
+    normalizeAngle(squareBoardYaw - heldBoardYaw) * ease((crashAge - 1.3) / 0.6);
   const crashFallAngle = crashAge < 0.4
     ? 1.1 + crashAge / 0.4 * 1.1
     : crashAge < 0.75
@@ -100,8 +128,8 @@ export function getRiderPose(state, input = {}) {
         ? 2.2 - (crashAge - 0.75) / 0.55 * 1.3
         : 0.9 * (1 - clamp((crashAge - 1.3) / 0.7, 0, 1));
   const crouch = clamp(
-    0.28 +
-      speedLean * 0.05 +
+    0.26 +
+      speedLean * 0.02 +
       // A carve sits the rider down a little; it does not fold them up.
       edgeAmount * 0.2 +
       loadedCrouch * 0.52 +
@@ -113,7 +141,9 @@ export function getRiderPose(state, input = {}) {
       // The legs already soak a bump as leg travel; this is only the brace for it.
       bumpImpact * 0.14 +
       gForce * 0.08 +
-      flickBite * 0.18,
+      flickBite * 0.1 -
+      // Throwing snow in a skid the rider stands up into it a little.
+      skid * 0.07,
     0,
     1,
   );
@@ -133,7 +163,7 @@ export function getRiderPose(state, input = {}) {
     // Where the hands hang for this pose; the animator adds how they trail it.
     arms: armTargets({ airborne, airOpen, collapse: crashCollapse, crouch,
       drift: handDrift, elapsed, lift: jumpStretch, speed: speedLean, stumble,
-      tilt: bodyTilt }),
+      switchRiding: Boolean(state.switchRiding), tilt: bodyTilt * chestSide }),
     boardRoll: clamp(
       finiteOr(state.edge) * (0.26 + speedLean * 0.79) *
         (state.surface === "rail" ? 0.1 : 1 - airborne * 0.7) + restingEdge +
@@ -154,7 +184,7 @@ export function getRiderPose(state, input = {}) {
     ),
     snowResponse: clamp(compression * 0.55 + bumpImpact * 0.5 + chatter * 0.12,
       0, 1),
-    boardYaw: state.boardYaw ?? state.heading,
+    boardYaw: state.crashed ? crashBoardYaw : state.boardYaw ?? state.heading,
     bodyYaw: state.torsoYaw ?? state.heading,
     bodySpin:
       (state.torsoRotation ?? state.torsoYaw ?? state.heading) -
@@ -170,7 +200,8 @@ export function getRiderPose(state, input = {}) {
     flickBite,
     boardPitch:
       airborne * verticalPhase * 0.18 + pop * 0.34 +
-      (state.terrainPitch ?? 0) * 0.6 +
+      // The board's lie on the snow comes from the snow itself; this is only a nudge.
+      (state.terrainPitch ?? 0) * 0.1 +
       (state.noseFloat ?? 0) * 0.12 +
       (state.pressAmount ?? 0) * 0.15,
     boardSlip: clamp(state.slipAngle ?? 0, -0.75, 0.75),
@@ -182,6 +213,11 @@ export function getRiderPose(state, input = {}) {
       1,
     ),
     crouch,
+    fall,
+    // Which way the body goes down: along the way it was travelling, and over
+    // the edge it caught.
+    fallHeading: travel + (state.crashed && state.crashReason !== "hazard" ? thrown * 0.7 : 0),
+    fallKind,
     fallRotation: state.crashed
       ? (Math.sign(state.crashSpin) || 1) * crashFallAngle
       : 0,
@@ -429,7 +465,7 @@ export function createRiderAnimator() {
       const styleRoll = add("styleRoll") - styleSide * airStyle * 0.07;
       const stylePitch = add("stylePitch") - airStyle * 0.05;
       // Idle life: sink a little into each lazy edge change.
-      const flow = Math.sin(elapsed * 1.8 + 0.15) ** 2 * 0.04 * style.ease;
+      const flow = Math.sin(elapsed * 1.8 + 0.15) ** 2 * 0.03 * style.ease;
 
       const headLook = advanceSpring(layers.head, target.headLook + add("headLook"),
         5.5, delta);
@@ -489,7 +525,8 @@ export function createRiderAnimator() {
         stumble: clamp(stumble, 0, 1),
         sway,
         swing,
-        tilt: bodyTilt,
+        switchRiding: Boolean(state.switchRiding),
+        tilt: bodyTilt * (state.switchRiding ? -1 : 1),
         trail: move.trail && { x: move.trail.x * show, y: move.trail.y * show, out: move.trail.out * show },
       });
 

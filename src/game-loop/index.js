@@ -46,6 +46,9 @@ export const syncHazardsToRider = (hazards, riderDownhill, delta = 0) =>
     };
   });
 
+// How much of an obstacle's outer edge the rider may brush past, in metres.
+const GRAZE = 0.25;
+
 export const hazardHitsRider = (hazard, riderState, input = {}) => {
   if (hazard.passed || Math.abs(hazard.z) > HIT_WINDOW) return false;
   // Which side of the obstacle's middle the rider is on, and how far.
@@ -55,7 +58,7 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
 
   if (hazard.kind === "jump") {
     const reach = hazard.radius ?? COURSE.halfWidth * 0.94;
-    if (lateralGap >= reach) return false;
+    if (lateralGap >= reach - GRAZE) return false;
     // A fallen tree's roots stand taller than its trunk, at their own end.
     const overRoots = hazard.rootEnd &&
       offset * hazard.rootEnd > reach - FALLEN_TREE.rootPlate.width;
@@ -74,9 +77,9 @@ export const hazardHitsRider = (hazard, riderState, input = {}) => {
     return (Number(input.crouch) || 0) < 0.75;
   }
   if (hazard.variant === "rolling-boulder") {
-    return air < hazard.radius * 1.85 && lateralGap < hazard.radius;
+    return air < hazard.radius * 1.85 && lateralGap < hazard.radius - GRAZE;
   }
-  return air < (hazard.clearance ?? 0.35) && lateralGap < (hazard.radius ?? 1.05);
+  return air < (hazard.clearance ?? 0.35) && lateralGap < (hazard.radius ?? 1.05) - GRAZE;
 };
 
 const randomBetween = (minimum, maximum) =>

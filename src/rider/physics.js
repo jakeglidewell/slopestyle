@@ -54,6 +54,15 @@ const BOARD_RETURN = 9.2;
 const STUMBLE_RETURN = 3.2;
 // Spin left at touchdown keeps turning the board while it dies away.
 const SLIDE_SPIN_SHARE = 0.5;
+// A crouched slide swings the board out this far (rad) straight away, and only
+// brings it on round to switch once it has been held this long (s).
+const BUTTER_ANGLE = 1.15;
+const BUTTER_SWITCH_HOLD = 1.8;
+// The spin a carve held into a pop throws, as a share of what a spin key throws:
+// half, so A or D gives a 180 where an arrow gives a 360.
+const CARVE_SPIN_SHARE = 0.5;
+// How far a heel-side skid swings the board, as a share of a toe-side one.
+const HEEL_SKID_SHARE = 0.84;
 const SLIDE_SPIN_DECAY = 8;
 // Seconds before touchdown at which the legs reach for the snow.
 const LANDING_GEAR_TIME = 0.28;
@@ -196,6 +205,8 @@ export function createRiderState(overrides = {}) {
     bodyHeave: finiteOr(overrides.bodyHeave, terrain.height),
     bumpImpact: clamp(finiteOr(overrides.bumpImpact, 0), 0, 1),
     butter: clamp(finiteOr(overrides.butter, 0), 0, 1),
+    // Seconds the current crouched slide has been held.
+    butterHold: Math.max(0, finiteOr(overrides.butterHold, 0)),
     carveQuality: clamp(finiteOr(overrides.carveQuality, 0), 0, 1),
     chatter: clamp(finiteOr(overrides.chatter, 0), 0, 1),
     compression: clamp(finiteOr(overrides.compression, 0), 0, 1),
@@ -545,6 +556,7 @@ export function stepRider(state, input = {}, deltaSeconds = 0, environment = {})
     : 0;
   const buttering = grounded && crouch > 0.62 && Math.abs(steer) > 0.3;
   const wasButtering = state.butter > 0.5 && Math.abs(state.steer) > 0.3;
+  const butterHold = buttering ? state.butterHold + delta : 0;
   const butterTarget = buttering ? 1 : 0;
   const butter = state.butter +
     (butterTarget - state.butter) * blend(butterTarget > state.butter ? 12 : 10, delta);
@@ -569,7 +581,11 @@ export function stepRider(state, input = {}, deltaSeconds = 0, environment = {})
   const boardReturn = (stumbling ? STUMBLE_RETURN : BOARD_RETURN) *
     (1 - clamp(Math.abs(state.slideSpin), 0, 1)) * delta;
   if (grounded && buttering) {
-    boardOffset += steer * (4.2 + Math.abs(pressAmount) * 0.5) * delta;
+    // Slide out to the butter angle and sit there; held long enough, come on
+    // round the half turn and stop, ready to ride away switch.
+    const reach = Math.sign(steer) * (butterHold < BUTTER_SWITCH_HOLD ? BUTTER_ANGLE : Math.PI);
+    const rate = (4.2 + Math.abs(pressAmount) * 0.5) * delta;
+    boardOffset += clamp(reach - boardOffset, -rate, rate);
   } else if (grounded && wasButtering && Math.abs(steer) < 0.05) {
     const halfTurns = Math.round(boardOffset / Math.PI);
     if (Math.abs(halfTurns) % 2 === 1) switchRiding = !switchRiding;
@@ -577,7 +593,11 @@ export function stepRider(state, input = {}, deltaSeconds = 0, environment = {})
     boardOffset -= clamp(boardOffset, -9.2 * delta, 9.2 * delta);
   } else if (grounded && Math.abs(steer) > 0.05) {
     const heldSlash = clamp((steerHold - 0.08) / 0.22, 0, 1);
-    const targetOffset = steer * (0.92 + heldSlash * 0.48);
+    // On the heels (the rider facing down the hill) the board stops a little
+    // shorter of square than on the toes: any further and the nose points back up.
+    const heels = Math.sign(steer) * (state.stance === "goofy" ? -1 : 1) *
+      (switchRiding ? -1 : 1) < 0;
+    const targetOffset = steer * (0.92 + heldSlash * 0.48) * (heels ? HEEL_SKID_SHARE : 1);
     const boardRate = 2.1 + 7.1 * boardLightness *
       (1 - edgeAmount * 0.55 - crouchAmount * 0.35);
     boardOffset += clamp(targetOffset - boardOffset, -boardRate * delta, boardRate * delta);
@@ -744,7 +764,10 @@ export function stepRider(state, input = {}, deltaSeconds = 0, environment = {})
       onSnow: false,
       velocity: Math.max(aimRate + pop, body.velocity + onLaunch),
     };
-    angularMomentum = clamp(steer * (2.6 + popPreload * 1.5) + turnRate * 0.12, -6, 6);
+    // A spin key held into the pop throws a full spin; a carve held into it,
+    // half of one.
+    const thrown = Math.abs(steer) > 0.05 ? steer : carve * CARVE_SPIN_SHARE;
+    angularMomentum = clamp(thrown * (2.6 + popPreload * 1.5) + turnRate * 0.12, -6, 6);
     preload = 0;
     popped = true;
   }
@@ -984,6 +1007,7 @@ export function stepRider(state, input = {}, deltaSeconds = 0, environment = {})
     stanceHeight,
     steer,
     steerHold,
+    butterHold,
     stumble,
     surface,
     switchRiding,
