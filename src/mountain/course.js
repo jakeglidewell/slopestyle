@@ -1,4 +1,5 @@
 export const CHUNK_LENGTH = 36;
+export const COURSE_HALF_WIDTH = 9.5;
 export const MAX_SCENERY_TIER = 3;
 export const HORIZON_Y = 0.36;
 export const RIDER_Y = 0.78;
@@ -41,7 +42,7 @@ export function courseReliefAt(distance) {
 const visibleChunkCache = new Map();
 
 const cachedSlopeChunk = (index, options) => {
-  const key = [index, options.halfWidth ?? 9.5, options.seed ?? 1].join(":");
+  const key = [index, options.halfWidth ?? COURSE_HALF_WIDTH, options.seed ?? 1].join(":");
   let chunk = visibleChunkCache.get(key);
   if (!chunk) {
     chunk = createSlopeChunk(index, options);
@@ -72,7 +73,7 @@ export function courseBendAt(distance) {
 }
 
 /** Stable world-space props for one course section. The white slope stays empty. */
-export function createSlopeChunk(index, { halfWidth = 9.5, seed = 1 } = {}) {
+export function createSlopeChunk(index, { halfWidth = COURSE_HALF_WIDTH, seed = 1 } = {}) {
   if (!Number.isInteger(index) || index < 0) {
     throw new RangeError("Chunk index must be a non-negative integer");
   }
@@ -123,7 +124,8 @@ export function slopeHalfAtY(canvas, y) {
 }
 
 /** Match the near-ground piste projection to the chase camera's rider offset. */
-export function courseViewAcross(canvas, riderAcross, cameraAcross, zoom = 1, halfWidth = 9.5) {
+export function courseViewAcross(canvas, riderAcross, cameraAcross, zoom = 1,
+  halfWidth = COURSE_HALF_WIDTH) {
   const cameraLag = (riderAcross - cameraAcross) * 14 * clamp(zoom || 1, 0.82, 1);
   const nearHalf = Math.max(1, slopeHalfAtY(canvas, canvas.height * 0.78));
   return riderAcross - cameraLag * halfWidth / nearHalf;
@@ -131,7 +133,7 @@ export function courseViewAcross(canvas, riderAcross, cameraAcross, zoom = 1, ha
 
 /** Shared projection keeps scenery, hazards, and cliff edges in one perspective. */
 export function projectCoursePoint(canvas, riderAcross, point, {
-  halfWidth = 9.5,
+  halfWidth = COURSE_HALF_WIDTH,
   travel = 0,
   viewDistance = 44,
 } = {}) {

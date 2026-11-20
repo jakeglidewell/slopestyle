@@ -23,6 +23,9 @@ export const courseSpeedForRider = (riderState) => {
     : Math.max(MIN_COURSE_SPEED, downhillSpeed);
 };
 
+export const riderOutsideCourse = (riderState) =>
+  Math.abs(riderState?.position?.across ?? 0) > COURSE.halfWidth;
+
 export const syncHazardsToRider = (hazards, riderDownhill, delta = 0) =>
   hazards.map((hazard) => {
     const z = hazard.worldDownhill - riderDownhill;
@@ -457,6 +460,7 @@ export default async function setupGameLoop(game) {
     audio.stopRide();
 
     if (reason === "cliff") {
+      game.events.dispatchEvent(new CustomEvent("rider:impact", { detail: hazard }));
       state.phase = "falling";
       state.fallTimer = 1.35;
       audio.fall();
@@ -484,9 +488,8 @@ export default async function setupGameLoop(game) {
     state.lastRiderDownhill = riderDownhill;
     audio.ride(riderState);
 
-    if (Math.abs(riderState.position.across) >
-        (game.runtime?.world3d ? 38 : COURSE.halfWidth)) {
-      endRun("cliff");
+    if (riderOutsideCourse(riderState)) {
+      endRun("cliff", { kind: "course-edge", x: riderState.position.across });
       return;
     }
 

@@ -1,13 +1,13 @@
 import * as THREE from "../vendor/three/three.module.js";
 import { createRiderModel } from "../rider/model3d.js";
 import { createSnowTrackTrail } from "../rider/renderer.js";
-import { CHUNK_LENGTH, visibleSlopeChunks } from "./course.js";
+import { CHUNK_LENGTH, COURSE_HALF_WIDTH, visibleSlopeChunks } from "./course.js";
 import { snowSurfaceHeight, snowSurfaceNormal } from "./terrain3d.js";
 
 const TERRAIN_LENGTH = 36;
 const TERRAIN_AHEAD = 246;
 const TERRAIN_BEHIND = 24;
-const HALF_WIDTH = 9.5;
+const HALF_WIDTH = COURSE_HALF_WIDTH;
 const terrainMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
   roughness: 0.98,
@@ -22,6 +22,14 @@ const needleMaterials = [0x1b4c42, 0x285c4e, 0x356d58].map(
 const snowMaterial = new THREE.MeshStandardMaterial({ color: 0xeaf3f3, roughness: 0.98 });
 const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x697b83, roughness: 0.98, flatShading: true });
 const rockShadeMaterial = new THREE.MeshStandardMaterial({ color: 0x4e626c, roughness: 1, flatShading: true });
+const edgeBaseMaterial = new THREE.MeshBasicMaterial({
+  color: 0x79adb8, opacity: 0.65, transparent: true, depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const edgeWhiteMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff, opacity: 0.9, transparent: true, depthWrite: false,
+  side: THREE.DoubleSide,
+});
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -144,6 +152,33 @@ const makeSnowGrooves = (index) => {
   lines.frustumCulled = false;
   return lines;
 };
+
+const makeCourseEdgeRibbon = (index, width, lift, material) => {
+  const vertices = [];
+  for (const side of [-1, 1]) {
+    for (let step = 0; step < 12; step += 1) {
+      const near = index * TERRAIN_LENGTH + step * 3;
+      const far = near + 3;
+      const left = side * HALF_WIDTH - width / 2;
+      const right = side * HALF_WIDTH + width / 2;
+      const a = [left, snowSurfaceHeight(left, near) + lift, -near];
+      const b = [right, snowSurfaceHeight(right, near) + lift, -near];
+      const c = [left, snowSurfaceHeight(left, far) + lift, -far];
+      const d = [right, snowSurfaceHeight(right, far) + lift, -far];
+      vertices.push(...a, ...b, ...c, ...b, ...d, ...c);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  const ribbon = new THREE.Mesh(geometry, material);
+  ribbon.frustumCulled = false;
+  return ribbon;
+};
+
+const makeCourseEdges = (index) => [
+  makeCourseEdgeRibbon(index, 0.34, 0.025, edgeBaseMaterial),
+  makeCourseEdgeRibbon(index, 0.16, 0.03, edgeWhiteMaterial),
+];
 
 const makePine = (size = 1) => {
   const tree = new THREE.Group();
@@ -369,15 +404,17 @@ export function createMountainWorld(canvas) {
       if (terrain.has(index)) continue;
       const mesh = makeTerrain(index);
       const grooves = makeSnowGrooves(index);
-      scene.add(mesh, grooves);
-      terrain.set(index, { mesh, grooves });
+      const edges = makeCourseEdges(index);
+      scene.add(mesh, grooves, ...edges);
+      terrain.set(index, { mesh, grooves, edges });
     }
     for (const [index, chunk] of terrain) {
       if (index >= first && index <= last) continue;
-      scene.remove(chunk.mesh, chunk.grooves);
+      scene.remove(chunk.mesh, chunk.grooves, ...chunk.edges);
       chunk.mesh.geometry.dispose();
       chunk.grooves.geometry.dispose();
       chunk.grooves.material.dispose();
+      for (const edge of chunk.edges) edge.geometry.dispose();
       terrain.delete(index);
     }
   };

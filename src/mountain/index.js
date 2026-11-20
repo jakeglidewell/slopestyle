@@ -1,6 +1,7 @@
 import {
   biomeAt,
   CHUNK_LENGTH,
+  COURSE_HALF_WIDTH,
   courseBendAt,
   courseViewAcross,
   HORIZON_Y,
@@ -12,7 +13,7 @@ import {
 
 /** Shared dimensions used by the game loop for spawning and edge collisions. */
 export const COURSE = Object.freeze({
-  halfWidth: 9.5,
+  halfWidth: COURSE_HALF_WIDTH,
   spawnDistance: 44,
 });
 
