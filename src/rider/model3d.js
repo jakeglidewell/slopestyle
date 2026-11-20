@@ -745,7 +745,10 @@ export function createRiderModel() {
     // back and the chest comes forward to balance.
     // (Throwing spray, the rider opens up and stands a little taller.)
     const spraying = clamp(finiteOr(pose.spray), 0, 1) * (1 - down);
-    let hinge = clamp((0.08 + crouch * 0.4 + legFold * 0.14 - spraying * 0.08) * (1 - toeSide * 0.7) -
+    // (All the way down, the chest comes over the knees: that is how the rider
+    // ducks under something.)
+    let hinge = clamp((0.08 + crouch * 0.4 + Math.max(0, crouch - 0.7) + legFold * 0.14 -
+      spraying * 0.08) * (1 - toeSide * 0.7) -
       toeSide * 0.12 + heelSide * 0.38 + grab * 0.6 + drag * 0.1 * facingSnow - jumpStretch * 0.16 +
       stumble * 0.12 * (1 - down) + finiteOr(pose.spineHinge), -0.3, 1.35);
     // Thrown down, the body lies long; sat down, it stays folded over the knees.

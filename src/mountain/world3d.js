@@ -471,7 +471,27 @@ const makeCluster = (hazard, groundAt) => {
  * The model for one obstacle, built around its own middle. `groundAt(x, z)` is
  * how much higher the snow is that far across and that far back up the hill.
  */
+const makeFullWidthLog = (hazard, groundAt) => {
+  const log = new THREE.Group();
+  const raised = hazard.kind === "duck";
+  const height = raised ? 2.1 : 0.19;
+  const segments = Math.ceil(hazard.radius);
+  const pointAt = (x) => at(x, groundAt(x, 0) + height, 0);
+  for (let segment = 0; segment < segments; segment += 1) {
+    const left = hazard.radius * (2 * segment / segments - 1);
+    const right = hazard.radius * (2 * (segment + 1) / segments - 1);
+    beam(log, barkMaterial, pointAt(left), pointAt(right), 0.31, 0.31, 9);
+  }
+  if (raised) {
+    for (const x of [-hazard.radius, hazard.radius]) {
+      beam(log, barkMaterial, at(x, groundAt(x, 0), 0), pointAt(x), 0.28, 0.23, 8);
+    }
+  }
+  return log;
+};
+
 export const makeHazard = (hazard, groundAt = FLAT_SNOW) => {
+  if (hazard.variant === "full-width-log") return makeFullWidthLog(hazard, groundAt);
   if (hazard.kind === "jump") return makeFallenTree(hazard, groundAt);
   if (hazard.kind === "duck") return makeSnappedTree(hazard, groundAt);
   if (hazard.variant === "rolling-boulder") return makeRollingBoulder(hazard.radius);
