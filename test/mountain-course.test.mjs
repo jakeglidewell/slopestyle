@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CHUNK_LENGTH,
+  COURSE_HALF_WIDTH,
   courseViewAcross,
   createSlopeChunk,
   projectCoursePoint,
@@ -29,7 +30,7 @@ test("roadside props stay outside the playable slope as scenery grows denser", (
 
   for (const chunk of [early, late]) {
     for (const prop of chunk.scenery) {
-      assert.ok(Math.abs(prop.x) > 9.5);
+      assert.ok(Math.abs(prop.x) > COURSE_HALF_WIDTH);
       assert.ok(prop.z >= chunk.index * CHUNK_LENGTH);
       assert.ok(prop.z < (chunk.index + 1) * CHUNK_LENGTH);
       assert.ok(["pine", "rock"].includes(prop.kind));
@@ -90,7 +91,8 @@ test("an obstacle at the rider's position lines up with camera lag", () => {
   const riderAcross = 4;
   const cameraAcross = 2;
   const zoom = 0.9;
-  const viewAcross = courseViewAcross(canvas, riderAcross, cameraAcross, zoom, 9.5);
+  const viewAcross = courseViewAcross(canvas, riderAcross, cameraAcross, zoom,
+    COURSE_HALF_WIDTH);
   const obstacle = projectCoursePoint(canvas, viewAcross, { x: riderAcross, z: 0 });
   const riderScreenX = canvas.width / 2 + (riderAcross - cameraAcross) * 14 * zoom;
 
@@ -149,4 +151,12 @@ test("course bends ahead while the contact point stays under the rider", () => {
   const firstBend = projectCoursePoint(canvas, 0, { x: 0, z: 20 }, { travel: 0 });
   const nextBend = projectCoursePoint(canvas, 0, { x: 0, z: 20 }, { travel: 90 });
   assert.notEqual(firstBend.x, nextBend.x);
+});
+
+test("the marked run leaves room to carve round an obstacle and back", () => {
+  // Measured: a full-lock carve at about 30 m/s takes 12 m of sideways travel to
+  // bring back. From the middle that is one such carve to either side.
+  const carveRoom = 12;
+  assert.ok(COURSE_HALF_WIDTH >= carveRoom * 2,
+    `only ${COURSE_HALF_WIDTH} m from the middle of the run to each edge line`);
 });

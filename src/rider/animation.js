@@ -1,5 +1,6 @@
 import { STUMBLE_TIME } from "./landing.js";
 import { LEG_COMPRESS, LEG_REACH } from "./legs.js";
+import { armTargets, FLOURISHES, flourishAfter, flourishGap } from "./style.js";
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -98,8 +99,41 @@ export function getRiderPose(state, input = {}) {
       : crashAge < 1.3
         ? 2.2 - (crashAge - 0.75) / 0.55 * 1.3
         : 0.9 * (1 - clamp((crashAge - 1.3) / 0.7, 0, 1));
+  const crouch = clamp(
+    0.28 +
+      speedLean * 0.05 +
+      // A carve sits the rider down a little; it does not fold them up.
+      edgeAmount * 0.2 +
+      loadedCrouch * 0.52 +
+      requestedCrouch * 0.22 +
+      airborne * 0.26 +
+      apexTuck * 0.16 -
+      airOpen * 0.2 -
+      jumpStretch * 0.1 +
+      // The legs already soak a bump as leg travel; this is only the brace for it.
+      bumpImpact * 0.14 +
+      gForce * 0.08 +
+      flickBite * 0.18,
+    0,
+    1,
+  );
+  const handDrift = Math.sin(elapsed * 1.09) + Math.sin(elapsed * 0.73 + 0.8) * 0.4;
+  // A hard carve always slides a little; that is riding, not losing it.
+  const stumble = clamp(
+    crashCollapse + finiteOr(state.washout) * 0.2 +
+      clamp(finiteOr(state.stumble) / STUMBLE_TIME, 0, 1) * 0.6 +
+      Math.max(0, finiteOr(state.landingImpact) - 3) * 0.1 +
+      // Rough snow is soaked by the legs; it barely unsettles the rider.
+      finiteOr(state.bumpImpact) * 0.05 + impactWarning * 0.28,
+    0,
+    1,
+  );
 
   return Object.freeze({
+    // Where the hands hang for this pose; the animator adds how they trail it.
+    arms: armTargets({ airborne, airOpen, collapse: crashCollapse, crouch,
+      drift: handDrift, elapsed, lift: jumpStretch, speed: speedLean, stumble,
+      tilt: bodyTilt }),
     boardRoll: clamp(
       finiteOr(state.edge) * (0.26 + speedLean * 0.79) *
         (state.surface === "rail" ? 0.1 : 1 - airborne * 0.7) + restingEdge +
@@ -147,22 +181,7 @@ export function getRiderPose(state, input = {}) {
       -1,
       1,
     ),
-    crouch: clamp(
-      0.28 +
-        speedLean * 0.08 +
-        edgeAmount * 0.38 +
-        loadedCrouch * 0.52 +
-        requestedCrouch * 0.22 +
-        airborne * 0.34 +
-        apexTuck * 0.18 -
-        airOpen * 0.2 -
-        jumpStretch * 0.1 +
-        bumpImpact * 0.38 +
-        gForce * 0.08 +
-        flickBite * 0.18,
-      0,
-      1,
-    ),
+    crouch,
     fallRotation: state.crashed
       ? (Math.sign(state.crashSpin) || 1) * crashFallAngle
       : 0,
@@ -177,9 +196,10 @@ export function getRiderPose(state, input = {}) {
       -1,
       1,
     ),
+    // A full carve brings the inside hand down; getting low in it lays it on the snow.
     handDrag: clamp(
-      (Math.abs(state.lean ?? 0) - 0.52) * 2.1 +
-        requestedCrouch * 0.38 + (state.washout ?? 0) * 0.65,
+      (Math.abs(state.lean ?? 0) - 0.62) * 1.4 +
+        requestedCrouch * 0.5 + (state.washout ?? 0) * 0.15,
       0,
       1,
     ),
@@ -222,7 +242,7 @@ export function getRiderPose(state, input = {}) {
       -1,
       1,
     ),
-    handDrift: Math.sin(elapsed * 1.09) + Math.sin(elapsed * 0.73 + 0.8) * 0.4,
+    handDrift,
     clothFlutter: clamp(finiteOr(state.speed) / 34, 0, 1) *
       (Math.sin(elapsed * finiteOr(state.speed) * 1.7) * 0.6 +
         Math.sin(elapsed * finiteOr(state.speed) * 2.63 + 0.5) * 0.25),
@@ -231,14 +251,16 @@ export function getRiderPose(state, input = {}) {
     shoulderTwist: clamp(-boardSwing * 0.16 - finiteOr(state.edge) * 0.08, -0.45, 0.45),
     armLag: 0,
     clothLag: 0,
-    stumble: clamp(
-      crashCollapse + finiteOr(state.washout) * 0.8 +
-        clamp(finiteOr(state.stumble) / STUMBLE_TIME, 0, 1) * 0.6 +
-        Math.max(0, finiteOr(state.landingImpact) - 3) * 0.1 +
-        finiteOr(state.bumpImpact) * 0.2 + impactWarning * 0.28,
-      0,
-      1,
-    ),
+    stumble,
+    // The rider's own touches; only the animator, which keeps time, adds any.
+    airStyle: 0,
+    flourish: "",
+    spineHinge: 0,
+    spineSide: 0,
+    spineTwist: 0,
+    stylePitch: 0,
+    styleRoll: 0,
+    styleYaw: 0,
     upperBodyTwist:
       state.edge * -0.22 -
       Math.sign(state.edge) * skid * 0.08 +
@@ -261,19 +283,49 @@ const advanceSpring = (spring, target, frequency, delta, damping = 0.74) => {
   return spring.value;
 };
 
-/** Independent pose layers keep the quick board and quiet upper body out of sync. */
+/**
+ * Something loose hanging off the body: it rests at zero and is left behind
+ * whenever the body accelerates by `push` (m/s², positive up or toward a turn).
+ */
+const advanceLoose = (spring, push, frequency, delta, damping) => {
+  const steps = Math.max(1, Math.ceil(delta * 120));
+  const step = delta / steps;
+  const omega = frequency * Math.PI * 2;
+  for (let index = 0; index < steps; index += 1) {
+    const acceleration = -push - spring.value * omega ** 2 -
+      2 * damping * omega * spring.velocity;
+    spring.velocity += acceleration * step;
+    spring.value += spring.velocity * step;
+  }
+  return spring.value;
+};
+
+const LAYERS = ["airStyle", "arm", "cloth", "crouch", "float", "grab", "head", "hinge",
+  "hips", "lean", "shoulders", "side", "stumble", "sway", "swing", "twist"];
+const createLayers = () =>
+  Object.fromEntries(LAYERS.map((name) => [name, createSpring()]));
+// What the rider is doing off their own bat: idle life, small moves, air style.
+const createStyle = () => ({
+  active: "",
+  age: 0,
+  calm: 0,
+  count: 0,
+  ease: 0,
+  gap: flourishGap(0),
+  jumps: 0,
+  rising: undefined,
+  wasAirborne: false,
+});
+
+/**
+ * Turns each frame's target pose into the rider's motion. The board is the
+ * physics and moves at once; the hips chase it fast and loose, the shoulders
+ * stay quiet and lead with the eyes, and the arms hang off all of it. On top
+ * sits the rider's own style, which fades the moment the player takes over.
+ */
 export function createRiderAnimator() {
-  let layers = {
-    arm: createSpring(),
-    cloth: createSpring(),
-    crouch: createSpring(),
-    grab: createSpring(),
-    head: createSpring(),
-    hips: createSpring(),
-    lean: createSpring(),
-    shoulders: createSpring(),
-    stumble: createSpring(),
-  };
+  let layers = createLayers();
+  let style = createStyle();
   let initialized = false;
   let steerDirection = 0;
   let flickAge = 0;
@@ -282,17 +334,8 @@ export function createRiderAnimator() {
 
   return Object.freeze({
     reset() {
-      layers = {
-        arm: createSpring(),
-        cloth: createSpring(),
-        crouch: createSpring(),
-        grab: createSpring(),
-        head: createSpring(),
-        hips: createSpring(),
-        lean: createSpring(),
-        shoulders: createSpring(),
-        stumble: createSpring(),
-      };
+      layers = createLayers();
+      style = createStyle();
       initialized = false;
       steerDirection = 0;
       flickAge = 0;
@@ -303,6 +346,11 @@ export function createRiderAnimator() {
       const target = getRiderPose(state, input);
       const delta = clamp(finiteOr(deltaSeconds), 0, 0.1);
       const steer = clamp(finiteOr(input.steer), -1, 1);
+      const carve = clamp(finiteOr(input.carve), -1, 1);
+      const holdingCrouch = clamp(finiteOr(input.crouch), 0, 1);
+      const elapsed = finiteOr(state.elapsed);
+      const speed = finiteOr(state.speed);
+      const speedLean = clamp((speed - 8) / 22, 0, 1);
       const direction = Math.abs(steer) > 0.05 && target.butter < 0.5
         ? Math.sign(steer)
         : 0;
@@ -329,10 +377,65 @@ export function createRiderAnimator() {
       if (!initialized) {
         layers.crouch.value = target.crouch;
         layers.lean.value = target.bodyTilt;
+        layers.sway.value = target.bodyTilt;
         initialized = true;
       }
-      const headLook = advanceSpring(layers.head, target.headLook, 5.5, delta);
-      const hipTwist = advanceSpring(layers.hips, boardSwing * 0.68, 3.2, delta);
+
+      // Quiet riding: nothing held, no edge set, nothing to recover from, and no
+      // more air than the float over a roller.
+      const calm = finiteOr(state.air) < 0.3 && !state.crashed && speed > 6 &&
+        Math.abs(steer) < 0.1 && Math.abs(carve) < 0.15 && holdingCrouch < 0.1 &&
+        Math.abs(finiteOr(state.edge)) < 0.22 && finiteOr(state.slash) < 0.1 &&
+        target.stumble < 0.25;
+      style.ease += (Number(calm) - style.ease) * (1 - Math.exp(-delta * (calm ? 2.5 : 9)));
+      // Smaller the faster the rider is going.
+      const show = style.ease * (1 - speedLean * 0.45);
+      style.calm = calm ? style.calm + delta : 0;
+      if (!style.active && style.calm >= style.gap && target.airborne <= 0) {
+        style.active = flourishAfter(style.count);
+        style.age = 0;
+      }
+      let move = {};
+      if (style.active) {
+        style.age += delta;
+        const progress = style.age / FLOURISHES[style.active].seconds;
+        if (progress < 1) {
+          move = FLOURISHES[style.active].at(progress);
+        } else {
+          style.active = "";
+          style.calm = 0;
+          style.count += 1;
+          style.gap = flourishGap(style.count);
+        }
+      }
+      const add = (name) => finiteOr(move[name]) * show;
+
+      // In the air with nothing held the rider adds a touch of their own, the
+      // other way each jump, and lets it go in time to land square.
+      if (target.airborne > 0 && !style.wasAirborne) style.jumps += 1;
+      style.wasAirborne = target.airborne > 0;
+      const falling = finiteOr(state.verticalVelocity) < 0;
+      const landingSoon = falling ? clamp(1 - (finiteOr(state.air) - 0.25) / 0.7, 0, 1) : 0;
+      const handsOff = (1 - clamp(Math.abs(finiteOr(state.tweak)) * 3, 0, 1)) *
+        (1 - holdingCrouch) * (1 - Math.abs(steer)) *
+        (1 - clamp(Math.abs(finiteOr(state.spinVelocity)) / 2.5, 0, 1));
+      const airStyle = clamp(advanceSpring(layers.airStyle,
+        state.crashed ? 0 : target.airborne * handsOff * (1 - landingSoon) *
+          clamp((finiteOr(state.airtime) - 0.1) / 0.25, 0, 1),
+        3.2, delta, 0.85), 0, 1);
+      const styleSide = style.jumps % 2 === 0 ? -1 : 1;
+
+      const styleYaw = add("styleYaw") + styleSide * airStyle * 0.24;
+      const styleRoll = add("styleRoll") - styleSide * airStyle * 0.07;
+      const stylePitch = add("stylePitch") - airStyle * 0.05;
+      // Idle life: sink a little into each lazy edge change.
+      const flow = Math.sin(elapsed * 1.8 + 0.15) ** 2 * 0.04 * style.ease;
+
+      const headLook = advanceSpring(layers.head, target.headLook + add("headLook"),
+        5.5, delta);
+      // Hips snap round with the board and wobble once: quick and loose.
+      const hipTwist = advanceSpring(layers.hips, (boardSwing + styleYaw) * 0.68,
+        4, delta, 0.5);
       const shoulderTwist = advanceSpring(layers.shoulders,
         target.shoulderTwist + hipTwist * 0.12, 1.5, delta);
       const armLag = advanceSpring(layers.arm,
@@ -340,25 +443,79 @@ export function createRiderAnimator() {
       const clothLag = advanceSpring(layers.cloth,
         -boardSwing * 0.9 - hipTwist * 0.22, 1.8, delta, 0.68);
       const bodyTilt = advanceSpring(layers.lean, target.bodyTilt, 3, delta);
-      const crouch = advanceSpring(layers.crouch, target.crouch,
-        target.crouch > layers.crouch.value ? 6.5 : 1.9, delta, 0.7);
+      const crouchTarget = clamp(target.crouch + flow + add("crouch") + airStyle * 0.07, 0, 1);
+      const crouch = clamp(advanceSpring(layers.crouch, crouchTarget,
+        crouchTarget > layers.crouch.value ? 6.5 : 1.9, delta, 0.7), 0, 1);
       const stumble = advanceSpring(layers.stumble, target.stumble, 2.4, delta);
       const grab = advanceSpring(layers.grab, target.grab,
         target.grab > layers.grab.value ? 5.5 : 4, delta, 0.86);
 
+      // Shoulders open into a turn ahead of the board and counter its flicks.
+      const spineTwist = advanceSpring(layers.twist,
+        clamp(carve * 0.2 - boardSwing * 0.18 - styleSide * airStyle * 0.2, -0.6, 0.6),
+        2.4, delta, 0.8);
+      const spineHinge = advanceSpring(layers.hinge,
+        clamp(finiteOr(state.compression), 0, 1) * 0.2 +
+          clamp(finiteOr(state.bumpImpact), 0, 1) * 0.12 + target.flickBite * 0.1 +
+          speedLean * 0.05 + target.breath * 0.012 * style.ease + add("spineHinge"),
+        3.4, delta, 0.7);
+      const spineSide = advanceSpring(layers.side,
+        Math.max(0, bodyTilt) * 0.12 + Math.min(0, bodyTilt) * 0.06 + target.press * 0.14 +
+          styleSide * airStyle * 0.08 + add("spineSide"),
+        2.6, delta, 0.8);
+
+      // The arms are loose weight: left behind when the body is pushed up or
+      // dropped, when it tips into a turn, and when the board flicks under it.
+      const rising = finiteOr(state.worldVerticalVelocity, finiteOr(state.verticalVelocity)) -
+        layers.crouch.velocity * 0.8;
+      const push = delta > 0 && style.rising !== undefined
+        ? clamp((rising - style.rising) / delta, -35, 35) : 0;
+      if (delta > 0) style.rising = rising;
+      const float = clamp(advanceLoose(layers.float, push, 2, delta, 0.45), -0.28, 0.28);
+      const sway = bodyTilt - advanceSpring(layers.sway, bodyTilt, 1.9, delta, 0.5);
+      const swing = advanceSpring(layers.swing, -(boardSwing + styleYaw) * 0.5, 3, delta, 0.42);
+      const arms = armTargets({
+        airborne: target.airborne,
+        airOpen: target.airOpen,
+        airStyle,
+        collapse: target.crashCollapse,
+        crouch,
+        drift: target.handDrift * style.ease,
+        elapsed,
+        float,
+        lead: move.lead && { x: move.lead.x * show, y: move.lead.y * show, out: move.lead.out * show },
+        lift: target.jumpStretch,
+        speed: speedLean,
+        stumble: clamp(stumble, 0, 1),
+        sway,
+        swing,
+        tilt: bodyTilt,
+        trail: move.trail && { x: move.trail.x * show, y: move.trail.y * show, out: move.trail.out * show },
+      });
+
       return Object.freeze({
         ...target,
+        airStyle,
         armLag,
+        arms,
         bodyTilt,
         boardSwing,
         clothLag,
-        crouch: clamp(crouch, 0, 1),
+        crouch,
+        flourish: show > 0.5 ? style.active : "",
+        foreAft: clamp(target.foreAft + add("foreAft"), -1, 1),
         grab: clamp(grab, 0, 1),
         headLook,
         hipTwist,
         lean: clamp(bodyTilt / 0.78, -1.04, 1.04),
         shoulderTwist,
+        spineHinge,
+        spineSide,
+        spineTwist,
         stumble,
+        stylePitch,
+        styleRoll,
+        styleYaw,
         upperBodyTwist: shoulderTwist,
       });
     },

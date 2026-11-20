@@ -12,6 +12,7 @@ import {
 } from "../src/mountain/terrain3d.js";
 import { createAirScoreTracker, stepAirScore } from "../src/game-loop/scoring.js";
 import { createRiderState, stepRider } from "../src/rider/physics.js";
+import { COURSE_HALF_WIDTH } from "../src/mountain/course.js";
 
 test("small side hits alternate along the piste and leave the center open", () => {
   const left = sideHitFeatureAt(0);
@@ -129,4 +130,15 @@ test("a centerline hop or crashed landing earns no side hit bonus", () => {
     rider(false, feature.lip + 8, feature.centerX),
     rider(true, feature.lip + 15, feature.centerX, 0, { crashed: true }), {});
   assert.equal(crash.award, null);
+});
+
+test("side hits sit out toward the edges of the run, inside the edge lines", () => {
+  for (let index = 0; index < 12; index += 1) {
+    const offset = Math.abs(sideHitFeatureAt(index).centerX);
+    assert.ok(offset > COURSE_HALF_WIDTH * 0.6,
+      `side hit ${index} is only ${offset.toFixed(1)} m from the centre line`);
+    // 2.4 m either side of its centre still counts as riding the hit.
+    assert.ok(offset + 2.4 < COURSE_HALF_WIDTH,
+      `side hit ${index} reaches ${(offset + 2.4).toFixed(1)} m, past the edge line`);
+  }
 });

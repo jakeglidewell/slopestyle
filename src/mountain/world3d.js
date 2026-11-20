@@ -2,6 +2,7 @@ import * as THREE from "../vendor/three/three.module.js";
 import { createRiderModel } from "../rider/model3d.js";
 import { createSnowTrackTrail } from "../rider/renderer.js";
 import { CHUNK_LENGTH, COURSE_HALF_WIDTH, visibleSlopeChunks } from "./course.js";
+import { clusterPieces, FALLEN_TREE, SNAPPED_TREE } from "./hazards.js";
 import {
   SIDE_HIT_FIRST_LIP,
   SIDE_HIT_SPACING,
@@ -13,9 +14,13 @@ import {
 } from "./terrain3d.js";
 
 const TERRAIN_LENGTH = 36;
+// Rows of snow mesh in each terrain section; anything laid on the snow follows them.
+const TERRAIN_ROWS = 48;
 const TERRAIN_AHEAD = 246;
 const TERRAIN_BEHIND = 24;
 const HALF_WIDTH = COURSE_HALF_WIDTH;
+// Snow that carries on past each edge line, under the scenery trees.
+const SHOULDER_WIDTH = 31;
 const terrainMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
   roughness: 0.98,
@@ -24,6 +29,9 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
 });
 const barkMaterial = new THREE.MeshStandardMaterial({ color: 0x655849, roughness: 1 });
 const barkLightMaterial = new THREE.MeshStandardMaterial({ color: 0x917963, roughness: 1 });
+// Freshly broken wood, and the earth a fallen tree's roots tear up with them.
+const splinterMaterial = new THREE.MeshStandardMaterial({ color: 0xc2a57e, roughness: 1, flatShading: true });
+const earthMaterial = new THREE.MeshStandardMaterial({ color: 0x4a4037, roughness: 1, flatShading: true });
 const needleMaterials = [0x1b4c42, 0x285c4e, 0x356d58].map(
   (color) => new THREE.MeshStandardMaterial({ color, roughness: 1, flatShading: true }),
 );
@@ -96,19 +104,23 @@ const makeSnowTexture = () => {
   return texture;
 };
 
-const makeTerrain = (index) => {
+export const makeTerrain = (index) => {
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
   const uvs = [];
   const indices = [];
   const acrossSamples = [];
-  for (let x = -41; x < -10; x += 2.5) acrossSamples.push(x);
-  for (let x = -10; x <= 10 + 1e-8; x += 0.5) acrossSamples.push(x);
-  for (let x = 12.5; x < 41; x += 2.5) acrossSamples.push(x);
-  acrossSamples.push(41);
+  // Fine columns across the run, coarse ones out under the scenery.
+  const fine = Math.ceil(HALF_WIDTH * 2) / 2;
+  const outer = fine + SHOULDER_WIDTH;
+  for (let x = fine + 2.5; x < outer; x += 2.5) acrossSamples.unshift(-x);
+  acrossSamples.unshift(-outer);
+  for (let x = -fine; x <= fine + 1e-8; x += 0.5) acrossSamples.push(x);
+  for (let x = fine + 2.5; x < outer; x += 2.5) acrossSamples.push(x);
+  acrossSamples.push(outer);
   const columns = acrossSamples.length - 1;
-  const rows = 48;
+  const rows = TERRAIN_ROWS;
   const groomed = new THREE.Color(0xeaf1f1);
   const shoulder = new THREE.Color(0xc8dde2);
   const color = new THREE.Color();
@@ -163,7 +175,8 @@ const makeTerrain = (index) => {
 
 const makeSnowGrooves = (index) => {
   const vertices = [];
-  for (let line = -11; line <= 11; line += 1) {
+  const lines = Math.floor((HALF_WIDTH - 1.1) / 0.76);
+  for (let line = -lines; line <= lines; line += 1) {
     const x = line * 0.76;
     for (let step = 0; step < 12; step += 1) {
       const a = index * TERRAIN_LENGTH + step * 3;
@@ -176,20 +189,20 @@ const makeSnowGrooves = (index) => {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
-  const lines = new THREE.LineSegments(
+  const grooves = new THREE.LineSegments(
     geometry,
     new THREE.LineBasicMaterial({ color: 0x86aeb8, transparent: true, opacity: 0.09, depthWrite: false }),
   );
-  lines.frustumCulled = false;
-  return lines;
+  grooves.frustumCulled = false;
+  return grooves;
 };
 
 const makeCourseEdgeRibbon = (index, width, lift, material) => {
   const vertices = [];
   for (const side of [-1, 1]) {
-    for (let step = 0; step < 12; step += 1) {
-      const near = index * TERRAIN_LENGTH + step * 3;
-      const far = near + 3;
+    for (let row = 0; row < TERRAIN_ROWS; row += 1) {
+      const near = index * TERRAIN_LENGTH + row / TERRAIN_ROWS * TERRAIN_LENGTH;
+      const far = index * TERRAIN_LENGTH + (row + 1) / TERRAIN_ROWS * TERRAIN_LENGTH;
       const left = side * HALF_WIDTH - width / 2;
       const right = side * HALF_WIDTH + width / 2;
       const a = [left, snowSurfaceHeight(left, near) + lift, -near];
@@ -206,7 +219,7 @@ const makeCourseEdgeRibbon = (index, width, lift, material) => {
   return ribbon;
 };
 
-const makeCourseEdges = (index) => [
+export const makeCourseEdges = (index) => [
   makeCourseEdgeRibbon(index, 0.34, 0.025, edgeBaseMaterial),
   makeCourseEdgeRibbon(index, 0.16, 0.03, edgeWhiteMaterial),
 ];
@@ -253,41 +266,215 @@ const makeRollingBoulder = (radius) => {
   return boulder;
 };
 
-const makeFallenLog = () => {
-  const feature = new THREE.Group();
-  const trunk = solid(new THREE.CylinderGeometry(0.29, 0.39, 14.5, 10),
-    barkMaterial, feature, 0, 0.44, 0);
-  trunk.rotation.z = Math.PI / 2;
-  for (const side of [-1, 1]) {
-    const ring = solid(new THREE.CylinderGeometry(0.4, 0.4, 0.035, 10),
-      barkLightMaterial, feature, side * 7.27, 0.44, 0);
-    ring.rotation.z = Math.PI / 2;
-  }
-  for (const offset of [-4.2, -1.5, 2.7, 5.2]) {
-    const limb = solid(new THREE.CylinderGeometry(0.055, 0.13, 1.15, 6),
-      barkMaterial, feature, offset, 0.7, -0.23);
-    limb.rotation.z = -0.7;
-  }
-  return feature;
+const UPRIGHT = new THREE.Vector3(0, 1, 0);
+const FLAT_SNOW = () => 0;
+const seededNoise = (seed, slot) => hash(seed * 7.13 + slot * 3.71);
+const at = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/** A round timber from `from` to `to`, `startRadius` thick at one end and `endRadius` at the other. */
+const beam = (parent, material, from, to, startRadius, endRadius, sides = 8) => {
+  const span = new THREE.Vector3().subVectors(to, from);
+  const mesh = solid(new THREE.CylinderGeometry(endRadius, startRadius, span.length(), sides),
+    material, parent);
+  mesh.position.copy(from).add(to).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(UPRIGHT, span.normalize());
+  return mesh;
 };
 
-const makeLowBranch = () => {
-  const feature = new THREE.Group();
-  const limb = solid(new THREE.CylinderGeometry(0.16, 0.28, 8, 8),
-    barkMaterial, feature, 0, 1.72, 0);
-  limb.rotation.z = Math.PI / 2;
-  for (const side of [-1, 1]) {
-    const cluster = makePine(0.6);
-    cluster.position.set(side * 4.1, 0, 0.15);
-    feature.add(cluster);
-  }
-  return feature;
+/** A bough pressed flat, from `base` out to `tip`, `spread` wide where it starts. */
+const bough = (parent, material, base, tip, spread, thickness) => {
+  const along = new THREE.Vector3().subVectors(tip, base);
+  const length = along.length();
+  along.normalize();
+  const geometry = new THREE.ConeGeometry(spread, length, 6);
+  geometry.scale(1, 1, thickness / spread);
+  const mesh = solid(geometry, material, parent);
+  const across = new THREE.Vector3().crossVectors(along, UPRIGHT).normalize();
+  mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+    across, along, new THREE.Vector3().crossVectors(across, along)));
+  mesh.position.copy(base).add(tip).multiplyScalar(0.5);
+  return mesh;
 };
 
-const makeHazard = (hazard) => {
-  if (hazard.kind === "jump") return makeFallenLog();
-  if (hazard.kind === "duck") return makeLowBranch();
+/**
+ * A windfall: a whole tree down across the fall line and settled into the snow,
+ * its roots torn up at one end. `groundAt(x, z)` is the snow's height around it.
+ */
+const makeFallenTree = (hazard, groundAt) => {
+  const tree = new THREE.Group();
+  const reach = Number(hazard.radius) || 5.5;
+  const roots = hazard.rootEnd === -1 ? -1 : 1;
+  const seed = Number(hazard.id) || 0;
+  const butt = at(roots * (reach - 0.3), 0, 0);
+  const tip = at(-roots * (reach - 0.03), 0, 0);
+  // Sunk in: a third of the trunk's thickness is under the snow.
+  butt.y = groundAt(butt.x, 0) + 0.12;
+  tip.y = groundAt(tip.x, 0) + 0.05;
+  const girth = (share) => 0.36 - share * 0.23;
+  const along = (share) => butt.clone().lerp(tip, share);
+  beam(tree, barkMaterial, butt, tip, girth(0), girth(1), 9);
+
+  // The root plate: a ragged disc of earth stood on edge, roots splayed from it.
+  const plateX = roots * (reach - 0.15);
+  const plateY = groundAt(plateX, 0) + 0.26;
+  const plate = solid(new THREE.CylinderGeometry(0.8, 0.72, 0.26, 7), earthMaterial, tree,
+    plateX, plateY, 0);
+  plate.rotation.set(seededNoise(seed, 1) * 0.6, 0, Math.PI / 2);
+  for (const [slot, angle] of [-1.9, -0.75, 0.35, 1.5].entries()) {
+    const swing = angle + (seededNoise(seed, 2 + slot) - 0.5) * 0.4;
+    beam(tree, barkMaterial,
+      at(plateX - roots * 0.08, plateY + Math.cos(swing) * 0.4, Math.sin(swing) * 0.4),
+      at(roots * (reach - 0.04), plateY + Math.cos(swing) * 0.8, Math.sin(swing) * 0.95),
+      0.075, 0.02, 5);
+  }
+  const plateSnow = solid(new THREE.BoxGeometry(0.24, 0.07, 0.95), snowMaterial, tree,
+    plateX, plateY + 0.8, 0);
+  plateSnow.castShadow = false;
+
+  // Limbs snapped off short in the fall, pale where they broke.
+  const stubs = 6;
+  for (let stub = 0; stub < stubs; stub += 1) {
+    const share = 0.1 + (stub + seededNoise(seed, 10 + stub) * 0.6) / stubs * 0.72;
+    const side = stub % 2 === 0 ? 1 : -1;
+    const root = along(share).add(at(0, girth(share) * 0.45, side * girth(share) * 0.6));
+    const length = 0.24 + seededNoise(seed, 20 + stub) * 0.2;
+    const end = root.clone().add(at(-roots * 0.22, 0.32, side).normalize().multiplyScalar(length));
+    beam(tree, barkMaterial, root, end, 0.06, 0.04, 5);
+    beam(tree, splinterMaterial, end,
+      end.clone().add(at(-roots * 0.22, 0.32, side).normalize().multiplyScalar(0.04)), 0.04, 0.03, 5);
+  }
+  // Toward the crown a few boughs still hold their needles, lying out over the
+  // snow to either side and following it up and down the hill.
+  for (const [slot, share] of [0.56, 0.68, 0.8, 0.9].entries()) {
+    const side = slot % 2 === 0 ? 1 : -1;
+    const base = along(share);
+    const reachOut = 1.5 - slot * 0.12;
+    const tipAt = at(base.x - roots * 0.4, 0, side * reachOut);
+    base.y = groundAt(base.x, 0) + 0.22;
+    tipAt.y = groundAt(tipAt.x, tipAt.z) + 0.16;
+    bough(tree, needleMaterials[slot % 3], base, tipAt, 0.5, 0.16);
+    // A little snow caught along its spine.
+    const dusting = bough(tree, snowMaterial, base.clone().add(at(0, 0.11, 0)),
+      base.clone().lerp(tipAt, 0.5).add(at(0, 0.11, 0)), 0.14, 0.07);
+    dusting.castShadow = false;
+  }
+  // Snow has settled along the top of the trunk.
+  const lie = Math.atan2(tip.y - butt.y, tip.x - butt.x);
+  for (const [from, to] of [[0.06, 0.34], [0.42, 0.62], [0.7, 0.97]]) {
+    const middle = along((from + to) / 2);
+    const drift = solid(new THREE.BoxGeometry((to - from) * butt.distanceTo(tip), 0.05,
+      girth((from + to) / 2) * 1.3), snowMaterial, tree,
+    middle.x, middle.y + girth((from + to) / 2) + 0.012, 0);
+    drift.rotation.z = lie;
+    drift.castShadow = false;
+  }
+  return tree;
+};
+
+/**
+ * A tree snapped off above head height: the stump still standing, the rest of
+ * the tree hinged to it and come to rest across a boulder. The trunk hangs
+ * clear of the snow between the two.
+ */
+const makeSnappedTree = (hazard, groundAt) => {
+  const tree = new THREE.Group();
+  const reach = Number(hazard.radius) || 4.5;
+  const stumpSide = hazard.stumpEnd === 1 ? 1 : -1;
+  const seed = Number(hazard.id) || 0;
+  const stumpX = stumpSide * (reach - 0.42);
+  const rockX = -stumpSide * (reach - 0.95);
+  const stumpGround = groundAt(stumpX, 0);
+  const rockGround = groundAt(rockX, 0);
+
+  beam(tree, barkMaterial, at(stumpX, stumpGround - 0.3, 0), at(stumpX, stumpGround + 0.5, 0),
+    0.4, 0.34, 9);
+  // The break is above a riding helmet and the trunk hangs just under it: a held
+  // crouch goes beneath with room to spare, a rider standing up does not.
+  beam(tree, barkMaterial, at(stumpX, stumpGround + 0.5, 0), at(stumpX, stumpGround + 2.42, 0),
+    0.34, 0.29, 9);
+  // Where it broke: long splinters standing up out of the stump.
+  for (let spike = 0; spike < 5; spike += 1) {
+    const angle = spike * 1.26 + seededNoise(seed, spike) * 0.5;
+    const rim = at(stumpX + Math.cos(angle) * 0.18, stumpGround + 2.38, Math.sin(angle) * 0.18);
+    beam(tree, splinterMaterial, rim,
+      rim.clone().add(at(Math.cos(angle) * 0.05, 0.3 + seededNoise(seed, 10 + spike) * 0.4,
+        Math.sin(angle) * 0.05)), 0.07, 0.012, 4);
+  }
+
+  const boulder = solid(new THREE.DodecahedronGeometry(0.9, 0), rockMaterial, tree,
+    rockX, rockGround + 0.98, 0.05);
+  boulder.scale.set(0.98, 1.32, 1.08);
+  boulder.rotation.set(0.3, seededNoise(seed, 20) * 3, 0.2);
+  const chock = solid(new THREE.DodecahedronGeometry(0.42, 0), rockShadeMaterial, tree,
+    rockX + stumpSide * 0.25, groundAt(rockX, 0.95) + 0.18, 0.95);
+  chock.scale.y = 0.7;
+
+  // The fallen top: hinged at the break, lying over the boulder.
+  const hinge = at(stumpX - stumpSide * 0.12, stumpGround + 2.37, 0.1);
+  const rest = at(rockX, rockGround + 2.16, 0.1);
+  const fall = rest.clone().sub(hinge);
+  const tipX = -stumpSide * (reach - 0.12);
+  const tip = hinge.clone().addScaledVector(fall, (tipX - hinge.x) / fall.x);
+  const girth = (share) => 0.23 - share * 0.1;
+  const along = (share) => hinge.clone().lerp(tip, share);
+  beam(tree, barkMaterial, hinge, tip, girth(0), girth(1), 9);
+  // A strip of torn wood still joins it to the stump.
+  beam(tree, splinterMaterial, at(stumpX, stumpGround + 2.3, 0.16),
+    hinge.clone().add(at(-stumpSide * 0.25, 0.1, 0.06)), 0.11, 0.07, 4);
+  for (let stub = 0; stub < 5; stub += 1) {
+    const share = 0.16 + (stub + seededNoise(seed, 30 + stub) * 0.5) / 5 * 0.7;
+    const side = stub % 2 === 0 ? 1 : -1;
+    const lean = at(-stumpSide * 0.2, 0.55, side).normalize();
+    const root = along(share).addScaledVector(lean, girth(share) * 0.6);
+    const end = root.clone().addScaledVector(lean, 0.25 + seededNoise(seed, 40 + stub) * 0.25);
+    beam(tree, barkMaterial, root, end, 0.055, 0.035, 5);
+    beam(tree, splinterMaterial, end, end.clone().addScaledVector(lean, 0.04), 0.035, 0.028, 5);
+  }
+  // What is left of the crown droops over the far side of the boulder.
+  for (const [slot, drop] of [0.55, 0.85].entries()) {
+    const hang = solid(new THREE.ConeGeometry(0.34 - slot * 0.06, 0.9, 6), needleMaterials[slot + 1],
+      tree, tip.x + stumpSide * (0.42 + slot * 0.3), tip.y - drop * 0.5, 0.1 + (slot ? -0.3 : 0.25));
+    hang.rotation.set(slot ? -0.5 : 0.5, 0, Math.PI + stumpSide * 0.35);
+  }
+  const lie = Math.atan2(tip.y - hinge.y, tip.x - hinge.x);
+  for (const [from, to] of [[0.08, 0.42], [0.5, 0.86]]) {
+    const middle = along((from + to) / 2);
+    const drift = solid(new THREE.BoxGeometry((to - from) * hinge.distanceTo(tip), 0.05,
+      girth((from + to) / 2) * 1.3), snowMaterial, tree,
+    middle.x, middle.y + girth((from + to) / 2) + 0.012, middle.z);
+    drift.rotation.z = lie;
+    drift.castShadow = false;
+  }
+  const cap = solid(new THREE.DodecahedronGeometry(0.4, 0), snowMaterial, tree,
+    rockX - stumpSide * 0.2, rockGround + 1.42, -0.42);
+  cap.scale.y = 0.4;
+  cap.castShadow = false;
+  return tree;
+};
+
+/** A tree island or rock garden: each tree and rock stood on its own patch of snow. */
+const makeCluster = (hazard, groundAt) => {
+  const cluster = new THREE.Group();
+  for (const piece of clusterPieces(hazard)) {
+    const model = piece.type === "rock" ? makeRock(piece.size) : makePine(piece.size);
+    model.position.set(piece.x, groundAt(piece.x, piece.z), piece.z);
+    model.rotation.y = piece.turn;
+    cluster.add(model);
+  }
+  return cluster;
+};
+
+/**
+ * The model for one obstacle, built around its own middle. `groundAt(x, z)` is
+ * how much higher the snow is that far across and that far back up the hill.
+ */
+export const makeHazard = (hazard, groundAt = FLAT_SNOW) => {
+  if (hazard.kind === "jump") return makeFallenTree(hazard, groundAt);
+  if (hazard.kind === "duck") return makeSnappedTree(hazard, groundAt);
   if (hazard.variant === "rolling-boulder") return makeRollingBoulder(hazard.radius);
+  if (hazard.variant === "tree-island" || hazard.variant === "rock-garden") {
+    return makeCluster(hazard, groundAt);
+  }
   return hazard.variant === "rock" ? makeRock(1.15) : makePine(1.25);
 };
 
@@ -297,7 +484,7 @@ const makeSideHitMarkers = (feature) => {
     [feature.lip - 3, flagMaterial, 1.75],
     [feature.lip + 26, landingFlagMaterial, 1.2],
   ]) {
-    const x = feature.side * 10.7;
+    const x = feature.side * (HALF_WIDTH + 1.2);
     const pole = new THREE.Group();
     pole.position.set(x, snowSurfaceHeight(x, downhill), -downhill);
     solid(new THREE.CylinderGeometry(0.025, 0.035, height, 6),
@@ -617,15 +804,17 @@ export function createMountainWorld(canvas) {
     for (const hazard of course.hazards) {
       const rolling = hazard.variant === "rolling-boulder";
       let mesh = hazardMeshes.get(hazard.id);
+      const ground = snowSurfaceHeight(hazard.x, hazard.worldDownhill);
       if (!mesh) {
-        mesh = makeHazard(hazard);
+        // Each part stands on the snow under it; local z runs back up the hill.
+        mesh = makeHazard(hazard, (x, z) =>
+          snowSurfaceHeight(hazard.x + x, hazard.worldDownhill - z) - ground);
         scene.add(mesh);
         hazardMeshes.set(hazard.id, mesh);
       } else if (!rolling) {
         continue;
       }
       const lift = rolling ? hazard.radius * 0.93 : 0;
-      const ground = snowSurfaceHeight(hazard.x, hazard.worldDownhill);
       mesh.position.set(hazard.x, ground + lift, -hazard.worldDownhill);
       if (rolling) mesh.rotation.z = -hazard.roll;
     }

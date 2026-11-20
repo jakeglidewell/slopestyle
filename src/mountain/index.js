@@ -820,7 +820,9 @@ const drawHazards = (context, canvas, riderAcross, travel, hazards) => {
       drawRollingBoulder(context, projected, hazard);
     } else {
       const size = projected.pathHalf / COURSE.halfWidth * 2.35;
-      if (hazard.variant === "rock") drawRock(context, projected.x, projected.y, size, true);
+      if (hazard.variant === "rock" || hazard.variant === "rock-garden") {
+        drawRock(context, projected.x, projected.y, size, true);
+      }
       else drawPine(context, projected.x, projected.y, size, true);
     }
 

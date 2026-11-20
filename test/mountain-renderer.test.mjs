@@ -39,6 +39,10 @@ test("the mountain renders a running course with every hazard type", async () =>
     { kind: "jump", x: 0, z: 25 },
     { kind: "duck", variant: "bird", x: 0, z: 34 },
     { kind: "duck", variant: "branch", x: 0, z: 42 },
+    { kind: "steer", variant: "tree-island", radius: 2.8, x: -9, z: 18 },
+    { kind: "steer", variant: "rock-garden", radius: 2.2, x: 9, z: 21 },
+    { kind: "jump", variant: "fallen-tree", radius: 5.5, rootEnd: 1, x: 6, z: 30 },
+    { kind: "duck", variant: "snapped-tree", radius: 4.5, stumpEnd: -1, x: -6, z: 38 },
   ];
   for (const [step, downhill] of [20, 21, 22].entries()) {
     game.events.dispatchEvent(new CustomEvent("course:update", {
