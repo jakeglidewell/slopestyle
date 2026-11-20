@@ -2,6 +2,7 @@
  * Owner 3 entry point: flow, HUD, scoring, audio, deployment, and mobile input.
  */
 import { COURSE } from "../mountain/index.js";
+import { FALLEN_TREE, ROCK_GARDEN, SNAPPED_TREE, TREE_ISLAND } from "../mountain/hazards.js";
 import { SIDE_HIT_FIRST_LIP, SIDE_HIT_SPACING,
   sideHitFeatureAt } from "../mountain/terrain3d.js";
 import { riderSpeedRangeAt } from "../rider/physics.js";
@@ -47,21 +48,35 @@ export const syncHazardsToRider = (hazards, riderDownhill, delta = 0) =>
 
 export const hazardHitsRider = (hazard, riderState, input = {}) => {
   if (hazard.passed || Math.abs(hazard.z) > HIT_WINDOW) return false;
-  const lateralGap = Math.abs(hazard.x - riderState.position.across);
+  // Which side of the obstacle's middle the rider is on, and how far.
+  const offset = riderState.position.across - hazard.x;
+  const lateralGap = Math.abs(offset);
   const air = Number(riderState.air) || 0;
 
   if (hazard.kind === "jump") {
-    return lateralGap < (hazard.radius ?? COURSE.halfWidth * 0.94) && air < 0.5;
+    const reach = hazard.radius ?? COURSE.halfWidth * 0.94;
+    if (lateralGap >= reach) return false;
+    // A fallen tree's roots stand taller than its trunk, at their own end.
+    const overRoots = hazard.rootEnd &&
+      offset * hazard.rootEnd > reach - FALLEN_TREE.rootPlate.width;
+    return air < (overRoots ? FALLEN_TREE.rootPlate.clearance : FALLEN_TREE.clearance);
   }
   if (hazard.kind === "duck") {
     const halfSpan = hazard.variant === "bird" ? 0.86 : 0.88;
-    return lateralGap < (hazard.radius ?? COURSE.halfWidth * halfSpan) &&
-      (Number(input.crouch) || 0) < 0.75;
+    const reach = hazard.radius ?? COURSE.halfWidth * halfSpan;
+    if (lateralGap >= reach) return false;
+    if (hazard.stumpEnd) {
+      // Only the hung trunk can be ducked; the stump and the boulder are solid.
+      const towardStump = offset * hazard.stumpEnd;
+      if (towardStump > reach - SNAPPED_TREE.stumpWidth ||
+          towardStump < SNAPPED_TREE.restWidth - reach) return true;
+    }
+    return (Number(input.crouch) || 0) < 0.75;
   }
   if (hazard.variant === "rolling-boulder") {
     return air < hazard.radius * 1.85 && lateralGap < hazard.radius;
   }
-  return air < 0.35 && lateralGap < 1.05;
+  return air < (hazard.clearance ?? 0.35) && lateralGap < (hazard.radius ?? 1.05);
 };
 
 const randomBetween = (minimum, maximum) =>
@@ -295,84 +310,92 @@ const createHud = (root) => {
   });
 };
 
-const spawnHazard = (state, riderDownhill, courseSpeed) => {
+// Places across the run an obstacle can sit, as shares of the way to each edge.
+const LANES = Object.freeze([-0.81, -0.54, -0.27, 0, 0.27, 0.54, 0.81]);
+// How far either side of the rider's line counts as in their way, in metres.
+const NEAR_LINE = 7;
+// The furthest a boulder rolls before it crosses the rider's line.
+const BOULDER_RUN = 16;
+
+/**
+ * Pick one of `places` ({ lane, x }) for the next obstacle. Across a wide run,
+ * something far off to one side is nothing to carve round, so places near the
+ * rider's own line are the likelier ones.
+ */
+const pickPlace = (places, riderAcross, random) => {
+  const weights = places.map(({ x }) => 1 / (1 + ((x - riderAcross) / NEAR_LINE) ** 2));
+  let roll = random() * weights.reduce((sum, weight) => sum + weight, 0);
+  for (let index = 0; index < places.length; index += 1) {
+    roll -= weights[index];
+    if (roll <= 0) return places[index];
+  }
+  return places.at(-1);
+};
+
+/**
+ * The next obstacle down the hill. `riderAcross` is where the rider is across
+ * the run; `random` stands in for Math.random.
+ */
+export const spawnHazard = (state, riderDownhill, courseSpeed, riderAcross = 0,
+  random = Math.random) => {
+  const half = COURSE.halfWidth;
+  const between = ([minimum, maximum]) => minimum + random() * (maximum - minimum);
   const worldDownhill = riderDownhill + COURSE.spawnDistance;
+  const hazard = { id: state.nextHazardId, passed: false, worldDownhill, z: COURSE.spawnDistance };
   if (state.nextHazardId === state.nextBoulderId) {
-    state.nextBoulderId += 5 + Math.floor(Math.random() * 3);
-    const direction = Math.random() < 0.5 ? 1 : -1;
-    const x = -direction * COURSE.halfWidth * 0.86;
-    const crossingX = direction * randomBetween(0.15, 1.5);
-    // Time the crossing near the center of the run at the rider's current pace.
-    const acrossSpeed = (crossingX - x) * courseSpeed / COURSE.spawnDistance;
+    state.nextBoulderId += 5 + Math.floor(random() * 3);
+    const direction = random() < 0.5 ? 1 : -1;
+    // Time the crossing for the rider's own line at their current pace.
+    const crossingX = clamp(Number(riderAcross) || 0, -half + 3, half - 3) +
+      direction * between([0.15, 1.5]);
+    const x = clamp(crossingX - direction * BOULDER_RUN, -half * 0.86, half * 0.86);
     return {
-      id: state.nextHazardId,
+      ...hazard,
       kind: "steer",
-      passed: false,
       variant: "rolling-boulder",
       radius: BOULDER_RADIUS,
-      acrossSpeed,
+      acrossSpeed: (crossingX - x) * courseSpeed / COURSE.spawnDistance,
       roll: 0,
-      worldDownhill,
       x,
-      z: COURSE.spawnDistance,
     };
   }
 
-  const actionRoll = Math.random();
+  const actionRoll = random();
   let kind = "steer";
   const sideHit = sideHitFeatureAt(Math.max(0,
     Math.round((worldDownhill - SIDE_HIT_FIRST_LIP) / SIDE_HIT_SPACING)));
+  // Alongside a side hit, nothing may lie on its run-in or its landing.
   const clearSideHit = worldDownhill >= sideHit.start - 4 &&
     worldDownhill <= sideHit.lip + 42;
 
-  if (!clearSideHit && state.dodged > 4 && actionRoll > 0.82) {
+  if (state.dodged > 4 && actionRoll > 0.82) {
     kind = "duck";
-  } else if (!clearSideHit && state.dodged > 2 && actionRoll > 0.64) {
+  } else if (state.dodged > 2 && actionRoll > 0.64) {
     kind = "jump";
   }
 
-  if (kind === "jump") {
-    return {
-      id: state.nextHazardId,
-      kind,
-      passed: false,
-      variant: "fallen-log",
-      radius: 7.2,
-      worldDownhill,
-      x: 0,
-      z: COURSE.spawnDistance,
-    };
-  }
-
-  if (kind === "duck") {
-    return {
-      id: state.nextHazardId,
-      kind,
-      passed: false,
-      variant: "branch",
-      radius: 3.9,
-      worldDownhill,
-      x: 0,
-      z: COURSE.spawnDistance,
-    };
-  }
-
-  const lanes = [-0.66, -0.34, 0, 0.34, 0.66];
-  const candidates = lanes.map((_, index) => index)
-    .filter((index) => index !== state.lastLane &&
-      (!clearSideHit || Math.abs(lanes[index] * COURSE.halfWidth -
-        sideHit.centerX) > 3.4));
-  const lane = candidates[Math.floor(Math.random() * candidates.length)];
-  state.lastLane = lane;
-  return {
-    id: state.nextHazardId,
-    kind,
-    passed: false,
-    variant: Math.random() > 0.38 ? "pine" : "rock",
-    worldDownhill,
-    x: lanes[lane] * COURSE.halfWidth + randomBetween(-0.18, 0.18),
-    z: COURSE.spawnDistance,
-  };
+  const feature = kind === "jump"
+    ? { variant: "fallen-tree", radius: between(FALLEN_TREE.halfLength),
+      rootEnd: random() < 0.5 ? -1 : 1 }
+    : kind === "duck"
+      ? { variant: "snapped-tree", radius: between(SNAPPED_TREE.halfLength),
+        stumpEnd: random() < 0.5 ? -1 : 1 }
+      : random() > 0.38
+        ? { variant: "tree-island", radius: between(TREE_ISLAND.radius),
+          clearance: TREE_ISLAND.clearance }
+        : { variant: "rock-garden", radius: between(ROCK_GARDEN.radius),
+          clearance: ROCK_GARDEN.clearance };
+  // All of it stays on the run, clear of the edge lines.
+  const furthest = half - feature.radius - 1.5;
+  const wander = clearSideHit ? 0 : 1.2;
+  const places = LANES
+    .map((share, lane) => ({ lane,
+      x: clamp(share * half + (random() * 2 - 1) * wander, -furthest, furthest) }))
+    .filter(({ lane, x }) => lane !== state.lastLane &&
+      (!clearSideHit || Math.abs(x - sideHit.centerX) >= feature.radius + 3.9));
+  const place = pickPlace(places, Number(riderAcross) || 0, random);
+  state.lastLane = place.lane;
+  return { ...hazard, kind, ...feature, x: place.x };
 };
 
 const nextSpawnDistance = (speed) =>
@@ -544,7 +567,8 @@ export default async function setupGameLoop(game) {
 
     state.hazards = syncHazardsToRider(state.hazards, riderDownhill, delta);
     if (state.spawnLeft <= 0) {
-      const hazard = spawnHazard(state, riderDownhill, courseSpeed);
+      const hazard = spawnHazard(state, riderDownhill, courseSpeed,
+        riderState.position.across);
       if (hazard) {
         state.hazards.push(hazard);
         state.nextHazardId += 1;

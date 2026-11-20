@@ -1,5 +1,6 @@
 export const CHUNK_LENGTH = 36;
-export const COURSE_HALF_WIDTH = 9.5;
+/** Metres from the centre line to each marked edge of the run. */
+export const COURSE_HALF_WIDTH = 24;
 export const MAX_SCENERY_TIER = 3;
 export const HORIZON_Y = 0.36;
 export const RIDER_Y = 0.78;

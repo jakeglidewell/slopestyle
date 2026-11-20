@@ -14,6 +14,8 @@ export const SIDE_HIT_SPACING = 82;
 const SIDE_HIT_APPROACH = 28;
 const SIDE_HIT_RUNOUT = 30;
 const SIDE_HIT_HALF_WIDTH = 3.6;
+// Far enough in from the edge line that the whole bank sits on the run.
+const SIDE_HIT_EDGE_INSET = 4;
 const sideHitFeatureCache = new Map();
 
 export function sideHitFeatureAt(index) {
@@ -21,7 +23,8 @@ export function sideHitFeatureAt(index) {
   if (sideHitFeatureCache.has(id)) return sideHitFeatureCache.get(id);
   const lip = SIDE_HIT_FIRST_LIP + id * SIDE_HIT_SPACING;
   const side = id % 2 === 0 ? -1 : 1;
-  const centerX = side * (6.9 + Math.sin(id * 1.7) * 0.25);
+  const centerX = side * (COURSE_HALF_WIDTH - SIDE_HIT_EDGE_INSET +
+    Math.sin(id * 1.7) * 0.25);
   const height = 1.2 + Math.sin(id * 1.7) * 0.14;
   const feature = Object.freeze({ id, lip, start: lip - SIDE_HIT_APPROACH,
     landingEnd: lip + SIDE_HIT_RUNOUT, centerX, side, height });
