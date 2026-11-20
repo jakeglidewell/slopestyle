@@ -6,11 +6,11 @@
 /** Board angle off the travel line, in radians, under which a landing is clean. */
 export const CLEAN_LANDING_ANGLE = Math.PI / 9;
 /** Board angle off the travel line past which a hard enough landing catches an edge. */
-export const CRASH_LANDING_ANGLE = Math.PI / 3;
+export const CRASH_LANDING_ANGLE = Math.PI * 7 / 18;
 // Touchdown speeds, in m/s: softer than the first a crooked board is let off,
 // softer than the second even a sideways board only stumbles.
 export const SOFT_TOUCH = 1.2;
-const EDGE_CATCH = 2.5;
+const EDGE_CATCH = 3.3;
 /** Seconds a sketchy landing leaves the rider stumbling. */
 export const STUMBLE_TIME = 0.45;
 

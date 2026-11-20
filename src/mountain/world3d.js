@@ -1,8 +1,11 @@
 import * as THREE from "../vendor/three/three.module.js";
 import { createRiderModel } from "../rider/model3d.js";
-import { createSnowTrackTrail } from "../rider/renderer.js";
+import { planeBoard } from "../rider/planing.js";
 import { CHUNK_LENGTH, COURSE_HALF_WIDTH, visibleSlopeChunks } from "./course.js";
 import { clusterPieces, FALLEN_TREE, SNAPPED_TREE } from "./hazards.js";
+import {
+  createSnowTrail, createSprayCloud, drawnCellHeight, skidSpray, sprayParticle, trailSection,
+} from "./snow-effects.js";
 import {
   SIDE_HIT_FIRST_LIP,
   SIDE_HIT_SPACING,
@@ -608,23 +611,71 @@ export function createMountainWorld(canvas) {
   const scenery = new Map();
   const hazardMeshes = new Map();
   const sideHitMeshes = new Map();
-  const tracks = createSnowTrackTrail(750);
-  const trackMesh = new THREE.Mesh(
-    new THREE.BufferGeometry(),
-    new THREE.MeshBasicMaterial({ color: 0x739bab, transparent: true, opacity: 0.18,
-      depthWrite: false, side: THREE.DoubleSide }),
-  );
+  // The trench the board leaves: a ribbon of strips laid across its path.
+  const trail = createSnowTrail();
+  const TRAIL_ROOM = 420;
+  const TRAIL_STRIPS = trailSection(0.2);
+  const TRAIL_TONES = Object.freeze({ floor: [0.3, 0.47, 0.59], wall: [0.38, 0.55, 0.66],
+    berm: [0.97, 0.995, 1], snow: [0.93, 0.965, 0.975] });
+  const trailShapes = new WeakMap();
+  const trailGeometry = new THREE.BufferGeometry();
+  trailGeometry.setAttribute("position", new THREE.BufferAttribute(
+    new Float32Array(TRAIL_ROOM * TRAIL_STRIPS.length * 3), 3));
+  trailGeometry.setAttribute("color", new THREE.BufferAttribute(
+    new Float32Array(TRAIL_ROOM * TRAIL_STRIPS.length * 4), 4));
+  trailGeometry.setIndex(new THREE.BufferAttribute(
+    new Uint32Array((TRAIL_ROOM - 1) * (TRAIL_STRIPS.length - 1) * 6), 1));
+  trailGeometry.setDrawRange(0, 0);
+  // Drawn just over the snow it lies on, and pulled toward the eye a little so
+  // the two never fight for the same pixels.
+  const trackMesh = new THREE.Mesh(trailGeometry, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+  trackMesh.frustumCulled = false;
   trackMesh.renderOrder = 1;
   scene.add(trackMesh);
-  const particles = [];
+
+  // The snow the board throws: soft round puffs, each its own size and strength.
+  const SPRAY_ROOM = 700;
+  const cloud = createSprayCloud(SPRAY_ROOM);
   const sprayGeometry = new THREE.BufferGeometry();
-  const sprayPositions = new Float32Array(140 * 3);
-  sprayGeometry.setAttribute("position", new THREE.BufferAttribute(sprayPositions, 3));
+  sprayGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SPRAY_ROOM * 3), 3));
+  sprayGeometry.setAttribute("size", new THREE.BufferAttribute(new Float32Array(SPRAY_ROOM), 1));
+  sprayGeometry.setAttribute("fade", new THREE.BufferAttribute(new Float32Array(SPRAY_ROOM), 1));
   sprayGeometry.setDrawRange(0, 0);
-  const spray = new THREE.Points(sprayGeometry,
-    new THREE.PointsMaterial({ color: 0xeaf9fb, size: 0.16, transparent: true,
-      opacity: 0.8, depthWrite: false, sizeAttenuation: true }));
+  const spray = new THREE.Points(sprayGeometry, new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { scale: { value: 600 } },
+    vertexShader: `
+      attribute float size;
+      attribute float fade;
+      uniform float scale;
+      varying float vFade;
+      void main() {
+        vec4 seen = modelViewMatrix * vec4(position, 1.0);
+        // Snow hanging right in front of the lens thins out instead of blinding it.
+        vFade = fade * smoothstep(1.0, 4.5, -seen.z);
+        gl_PointSize = size * scale / max(0.1, -seen.z);
+        gl_Position = projectionMatrix * seen;
+      }`,
+    fragmentShader: `
+      varying float vFade;
+      void main() {
+        vec2 off = gl_PointCoord - 0.5;
+        float edge = dot(off, off) * 4.0;
+        if (edge > 1.0) discard;
+        // Lit from above: bright on top, the blue of snow shadow underneath.
+        vec3 lit = mix(vec3(0.78, 0.86, 0.93), vec3(0.985, 0.995, 1.0),
+          smoothstep(0.75, 0.2, gl_PointCoord.y));
+        gl_FragColor = vec4(lit, (1.0 - edge) * vFade);
+      }`,
+  }));
+  spray.frustumCulled = false;
+  spray.renderOrder = 2;
   scene.add(spray);
+  const boardPoint = new THREE.Vector3();
+  let wasInAir = false;
 
   let course = { hazards: [], phase: "idle" };
   let previousElapsed = 0;
@@ -702,6 +753,24 @@ export function createMountainWorld(canvas) {
     return near * (1 - downhillMix) + far * downhillMix;
   };
 
+  /** Height of the snow as it is drawn here: the mesh itself, ruts and all. */
+  const drawnSnowAt = (across, downhill, surface) => {
+    const chunkIndex = Math.floor(downhill / TERRAIN_LENGTH);
+    const chunk = terrain.get(chunkIndex);
+    if (!chunk) return snowSurfaceHeight(across, downhill, surface);
+    const samples = chunk.acrossSamples;
+    let column = 0;
+    while (column < samples.length - 2 && samples[column + 1] < across) column += 1;
+    const rowValue = clamp((downhill - chunkIndex * TERRAIN_LENGTH) /
+      TERRAIN_LENGTH * chunk.rows, 0, chunk.rows);
+    const row = Math.min(chunk.rows - 1, Math.floor(rowValue));
+    const at = (r, c) => chunk.baseHeights[r * samples.length + c] +
+      chunk.rutOffsets[r * samples.length + c];
+    return drawnCellHeight(at(row, column), at(row, column + 1), at(row + 1, column),
+      at(row + 1, column + 1),
+      (across - samples[column]) / (samples[column + 1] - samples[column]), rowValue - row);
+  };
+
   const resetSnowRuts = () => {
     lastSnowStamp = null;
     for (const chunk of terrain.values()) {
@@ -720,20 +789,29 @@ export function createMountainWorld(canvas) {
     }
   };
 
-  const stampSnow = (state) => {
+  /** How deep the rider's weight presses a rut into this snow. */
+  const rutDepth = (state) => ({
+    powder: 0.16, chop: 0.095, slush: 0.075,
+    groomed: 0.045, ice: 0.008, rail: 0,
+  }[state.surface] ?? 0.08) *
+    (0.7 + clamp(state.compression || 0, 0, 1) * 0.22 +
+      clamp(state.gForce || 0, 0, 1.5) * 0.12);
+
+  /**
+   * Press the rider's rut into the snow. `board`, when given, is the planing
+   * board ({ height, pitch, roll, yaw }): wherever the snow stands above its base
+   * the board has ploughed through it, so the trench is cut down to the board.
+   */
+  const stampSnow = (state, board) => {
     if (course.phase !== "running" || state.air > 0.08 || state.crashed) return;
     const across = state.position.across;
     const downhill = state.position.downhill;
     if (lastSnowStamp && Math.hypot(across - lastSnowStamp.across,
       downhill - lastSnowStamp.downhill) < 0.34) return;
     lastSnowStamp = { across, downhill };
-    const depthBySurface = {
-      powder: 0.16, chop: 0.095, slush: 0.075,
-      groomed: 0.045, ice: 0.008, rail: 0,
-    };
-    const depth = (depthBySurface[state.surface] ?? 0.08) *
-      (0.7 + clamp(state.compression || 0, 0, 1) * 0.22 +
-        clamp(state.gForce || 0, 0, 1.5) * 0.12);
+    const depth = rutDepth(state);
+    const noseAcross = board ? Math.sin(board.yaw) : 0;
+    const noseDownhill = board ? Math.cos(board.yaw) : 1;
     const width = 0.6 + clamp(state.skid || 0, 0, 1) * 0.3;
     for (const [chunkIndex, chunk] of terrain) {
       if (downhill < chunkIndex * TERRAIN_LENGTH - 2 ||
@@ -753,8 +831,19 @@ export function createMountainWorld(canvas) {
             sampleDownhill - downhill, width, depth);
           const vertex = row * samples.length + column;
           const previous = chunk.rutOffsets[vertex];
-          const next = offset < 0 ? Math.min(previous, offset) :
+          let next = offset < 0 ? Math.min(previous, offset) :
             previous < 0 ? previous : Math.max(previous, offset);
+          if (board) {
+            const dx = sampleAcross - across;
+            const dd = sampleDownhill - downhill;
+            const along = dx * noseAcross + dd * noseDownhill;
+            const beside = dx * noseDownhill - dd * noseAcross;
+            if (Math.abs(along) < 1.3 && Math.abs(beside) < 0.55) {
+              const cut = board.height - 0.02 + Math.tan(board.pitch) * along +
+                Math.tan(board.roll) * beside - chunk.baseHeights[vertex];
+              if (cut < next) next = Math.max(cut, -0.45);
+            }
+          }
           if (next === previous) continue;
           chunk.rutOffsets[vertex] = next;
           positions.setY(vertex, chunk.baseHeights[vertex] + next);
@@ -826,74 +915,136 @@ export function createMountainWorld(canvas) {
     }
   };
 
-  const updateTracks = (state) => {
-    tracks.update(state);
-    const vertices = [];
-    const now = state.position.downhill;
-    const points = tracks.points();
-    for (let index = 1; index < points.length; index += 1) {
-      const a = points[index - 1];
-      const b = points[index];
-      if (now - a.downhill > 5 || b.downhill > now + 0.2 ||
-          b.downhill - a.downhill > 1.8) continue;
-      const width = b.kind === "carve" ? 0.035 : b.kind === "skid" ? 0.14 : 0.07;
-      const leftA = a.across - width;
-      const rightA = a.across + width;
-      const leftB = b.across - width;
-      const rightB = b.across + width;
-      const ya = snowSurfaceHeight(a.across, a.downhill) +
-        readSnowRut(a.across, a.downhill) + 0.022;
-      const yb = snowSurfaceHeight(b.across, b.downhill) +
-        readSnowRut(b.across, b.downhill) + 0.022;
-      vertices.push(
-        leftA, ya, -a.downhill, rightA, ya, -a.downhill, leftB, yb, -b.downhill,
-        rightA, ya, -a.downhill, rightB, yb, -b.downhill, leftB, yb, -b.downhill,
-      );
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
-    trackMesh.geometry.dispose();
-    trackMesh.geometry = geometry;
+  /** Where each strip of the trench sits at one point of the trail. */
+  const layTrail = (points, index, surface) => {
+    const point = points[index];
+    // The path's own direction here, from the neighbours on the same stretch.
+    const before = point.starts ? point : points[index - 1];
+    const next = points[index + 1];
+    const after = next && !next.starts ? next : point;
+    let across = after.across - before.across;
+    let downhill = after.downhill - before.downhill;
+    const length = Math.hypot(across, downhill);
+    if (length < 1e-6) { across = 0; downhill = 1; } else { across /= length; downhill /= length; }
+    const strips = trailSection(point.halfWidth);
+    const shape = new Float32Array(strips.length * 3);
+    strips.forEach((strip, at) => {
+      const x = point.across + downhill * strip.at;
+      const d = point.downhill - across * strip.at;
+      shape[at * 3] = x;
+      shape[at * 3 + 1] = drawnSnowAt(x, d, surface) + strip.lift;
+      shape[at * 3 + 2] = -d;
+    });
+    return shape;
   };
 
-  const updateSpray = (state, pose, ground, delta) => {
-    for (let index = particles.length - 1; index >= 0; index -= 1) {
-      const particle = particles[index];
-      particle.life -= delta;
-      if (particle.life <= 0) {
-        particles.splice(index, 1);
-        continue;
+  const updateTrail = (state, boardYaw) => {
+    trail.update(state, boardYaw);
+    const all = trail.points();
+    // Only what still lies on drawn snow; the hill further back is gone.
+    let first = Math.max(0, all.length - TRAIL_ROOM);
+    while (first < all.length &&
+        !terrain.has(Math.floor(all[first].downhill / TERRAIN_LENGTH))) first += 1;
+    const position = trailGeometry.attributes.position;
+    const color = trailGeometry.attributes.color;
+    const index = trailGeometry.index;
+    const strips = TRAIL_STRIPS.length;
+    const now = state.position.downhill;
+    let drawn = 0;
+    for (let at = first; at < all.length; at += 1) {
+      const point = all[at];
+      const slot = at - first;
+      // The last few points are still being pressed and ploughed: lay them afresh.
+      let shape = trailShapes.get(point);
+      if (!shape || at >= all.length - 8) {
+        shape = layTrail(all, at, state.surface);
+        trailShapes.set(point, shape);
       }
-      particle.x += particle.vx * delta;
-      particle.y += particle.vy * delta;
-      particle.z += particle.vz * delta;
-      particle.vy -= 5.8 * delta;
+      position.array.set(shape, slot * strips * 3);
+      // Sharp by the board, softening up the hill until it is gone.
+      const fade = (1 - clamp((now - point.downhill) / 150, 0, 1) ** 1.6) *
+        (0.35 + point.deep * 0.65);
+      TRAIL_STRIPS.forEach((strip, lane) => {
+        const tone = TRAIL_TONES[strip.tone];
+        color.setXYZW(slot * strips + lane, tone[0], tone[1], tone[2], strip.alpha * fade);
+      });
+      if (slot > 0 && !point.starts) {
+        for (let lane = 0; lane < strips - 1; lane += 1) {
+          const a = (slot - 1) * strips + lane;
+          const c = slot * strips + lane;
+          index.array.set([a, c, a + 1, a + 1, c, c + 1], drawn);
+          drawn += 6;
+        }
+      }
     }
-    const intensity = clamp(Number(pose.spray) || 0, 0, 1);
-    if (course.phase === "running" && state.air < 0.08 && intensity > 0.12) {
-      const count = Math.min(10, Math.ceil(intensity * 7));
-      const side = Math.sign(state.slipAngle || state.edge || 1);
-      for (let index = 0; index < count && particles.length < 140; index += 1) {
-        const seed = hash(state.elapsed * 113 + index * 23);
-        particles.push({
-          x: state.position.across + side * (0.15 + seed * 0.22),
-          y: ground + 0.09,
-          z: -state.position.downhill + 0.2,
-          vx: side * (0.7 + seed * 2.9),
-          vy: 1.2 + seed * 2.9,
-          vz: 1.2 + hash(seed * 17) * 3.5,
-          life: 0.3 + seed * 0.45,
+    position.needsUpdate = true;
+    color.needsUpdate = true;
+    index.needsUpdate = true;
+    trailGeometry.setDrawRange(0, drawn);
+  };
+
+  /** One puff, placed on the board's own edge and thrown over the snow. */
+  const throwPuff = (thrown, state, delta) => {
+    const puff = sprayParticle(thrown);
+    boardPoint.set(puff.local[0], puff.local[1], puff.local[2])
+      .applyQuaternion(rider.board.quaternion).add(rider.board.position).add(rider.group.position);
+    // The board moved all through the frame: the puffs left it all along the way.
+    const ago = Math.random() * delta;
+    return {
+      x: boardPoint.x - (Number(state.velocity?.across) || 0) * ago,
+      y: boardPoint.y,
+      z: boardPoint.z + (Number(state.velocity?.downhill) || 0) * ago,
+      vx: puff.velocity.across,
+      vy: puff.velocity.up,
+      vz: -puff.velocity.downhill,
+      life: puff.life,
+      size: puff.size,
+      heavy: puff.heavy,
+      floor: boardPoint.y - 0.3,
+    };
+  };
+
+  const updateSpray = (state, pose, delta) => {
+    cloud.step(delta);
+    const inAir = (Number(state.air) || 0) > 0.08;
+    if (course.phase === "running" && delta > 0) {
+      const thrown = skidSpray(state, pose);
+      const puffs = thrown.rate + thrown.tailRate;
+      if (puffs > 0) cloud.emit(puffs, delta, () => throwPuff(thrown, state, delta));
+      // Coming back down throws snow out from under both edges at once.
+      if (wasInAir && !inAir && !state.crashed) {
+        const landing = skidSpray({ ...state, air: 0 }, pose);
+        const hard = clamp((Number(state.landingImpact) || 0) / 6, 0.25, 1);
+        const burst = 70 * hard * (landing.size > 0 ? landing.size / 0.34 : 0);
+        let side = 1;
+        cloud.emit(burst / delta, delta, () => {
+          side = -side;
+          return throwPuff({ ...landing, rate: 1, tailRate: 0, edge: side, way: side,
+            throwSpeed: 2.2 + hard * 3, lift: 1.6 + hard * 2.6 }, state, delta);
         });
       }
     }
-    for (let index = 0; index < particles.length; index += 1) {
-      const particle = particles[index];
-      sprayPositions[index * 3] = particle.x;
-      sprayPositions[index * 3 + 1] = particle.y;
-      sprayPositions[index * 3 + 2] = particle.z;
+    wasInAir = inAir;
+    const position = sprayGeometry.attributes.position;
+    const size = sprayGeometry.attributes.size;
+    const fade = sprayGeometry.attributes.fade;
+    const puffs = cloud.particles();
+    for (let at = 0; at < puffs.length; at += 1) {
+      const puff = puffs[at];
+      const spent = puff.age / puff.life;
+      position.setXYZ(at, puff.x, puff.y, puff.z);
+      // Fine snow swells as it hangs and thins out as it goes; a clump stays the
+      // size it was thrown, bright and solid until it is gone.
+      size.setX(at, puff.heavy ? puff.size : puff.size * (0.8 + spent * 1.8));
+      fade.setX(at, puff.heavy ? Math.min(1, puff.age / 0.02) * (1 - spent) ** 0.6 * 0.95
+        : Math.min(1, puff.age / 0.05) * (1 - spent) ** 1.4 * 0.42);
     }
-    sprayGeometry.attributes.position.needsUpdate = true;
-    sprayGeometry.setDrawRange(0, particles.length);
+    position.needsUpdate = true;
+    size.needsUpdate = true;
+    fade.needsUpdate = true;
+    sprayGeometry.setDrawRange(0, puffs.length);
+    spray.material.uniforms.scale.value = renderer.domElement.height /
+      (2 * Math.tan(camera.fov * Math.PI / 360));
   };
 
   const render = ({ camera: follow = {}, pose = {}, state = {} } = {}) => {
@@ -905,8 +1056,9 @@ export function createMountainWorld(canvas) {
     const delta = elapsed < previousElapsed ? 0 : clamp(elapsed - previousElapsed, 0, 0.05);
     previousElapsed = elapsed;
     if (restarted) {
-      tracks.reset();
-      particles.length = 0;
+      trail.reset();
+      cloud.reset();
+      wasInAir = false;
       resetSnowRuts();
     }
 
@@ -914,13 +1066,21 @@ export function createMountainWorld(canvas) {
     updateSideHitMarkers(distance);
     updateScenery(distance);
     updateHazards();
-    stampSnow(state);
-    const ground = snowSurfaceHeight(across, distance, state.surface) +
-      readSnowRut(across, distance);
-    rider.update(state, pose, ground,
-      snowSurfaceNormal(across, distance, state.surface));
-    updateTracks(state);
-    updateSpray(state, pose, ground, delta);
+    // The board planes along its own length, pressed a rut's depth into the snow,
+    // and ploughs its trench through whatever stands above that. The body stands
+    // on the ordinary rut, so none of the ploughing reaches it.
+    const surface = snowSurfaceHeight(across, distance, state.surface);
+    const boardYaw = Number.isFinite(pose.boardYaw) ? pose.boardYaw : Number(state.boardYaw) || 0;
+    const plane = planeBoard((x, d) => snowSurfaceHeight(x, d, state.surface), across, distance,
+      boardYaw);
+    const pressed = rutDepth(state);
+    stampSnow(state, { ...plane, height: plane.height - pressed, yaw: boardYaw });
+    const rut = Math.max(readSnowRut(across, distance), -pressed);
+    const ground = surface + rut;
+    rider.update(state, pose, ground, snowSurfaceNormal(across, distance, state.surface),
+      { ...plane, height: plane.height + rut });
+    updateTrail(state, boardYaw);
+    updateSpray(state, pose, delta);
 
     const cameraAcross = Number.isFinite(follow.position?.across)
       ? follow.position.across : across;

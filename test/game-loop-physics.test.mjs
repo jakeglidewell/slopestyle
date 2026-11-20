@@ -222,11 +222,11 @@ test("a fallen tree's root plate needs more air than its trunk", () => {
   assert.equal(hazardHitsRider(tree, rider(2, 0.3)), true);
   assert.equal(hazardHitsRider(tree, rider(2, 0.6)), false);
   assert.equal(hazardHitsRider(tree, rider(-3.2, 0.6)), false);
-  // The roots stand at the +x end here.
-  assert.equal(hazardHitsRider(tree, rider(7.3, 0.6)), true);
-  assert.equal(hazardHitsRider(tree, rider(7.3, FALLEN_TREE.rootPlate.clearance + 0.1)), false);
+  // The roots stand at the +x end here (its outermost quarter metre may be brushed).
+  assert.equal(hazardHitsRider(tree, rider(7.1, 0.6)), true);
+  assert.equal(hazardHitsRider(tree, rider(7.1, FALLEN_TREE.rootPlate.clearance + 0.1)), false);
   assert.equal(hazardHitsRider(tree, rider(7.6, 0)), false);
-  assert.equal(hazardHitsRider({ ...tree, rootEnd: -1 }, rider(7.3, 0.6)), false);
+  assert.equal(hazardHitsRider({ ...tree, rootEnd: -1 }, rider(7.1, 0.6)), false);
 });
 
 test("a snapped tree is ducked between its stump and the rock it rests on, not through them", () => {

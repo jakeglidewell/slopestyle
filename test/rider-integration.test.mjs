@@ -92,7 +92,21 @@ const startRiderLoop = async (context) => {
   game.events.addEventListener("rider:update", (event) => updates.push(event.detail));
   await setupRider(game);
   game.events.dispatchEvent(new Event("ready"));
-  return { frame: (timestamp) => frames.shift()(timestamp), updates };
+  return { frame: (timestamp) => frames.shift()(timestamp), game, updates };
+};
+
+/** Run `seconds` of 60 Hz frames, with the course reporting `phase` after each. */
+const play = (loop, seconds, phase) => {
+  loop.clock ??= 0;
+  for (let frame = 0; frame < Math.round(seconds * 60); frame += 1) {
+    loop.frame(loop.clock);
+    loop.clock += 1000 / 60;
+    if (phase) {
+      loop.game.events.dispatchEvent(
+        new CustomEvent("course:update", { detail: { hazards: [], phase } }));
+    }
+  }
+  return loop.updates.at(-1);
 };
 
 test("the rider loop publishes a steadied camera rig for the 3D world", async (context) => {
@@ -120,4 +134,45 @@ test("every frame moves the rider by exactly that frame's duration", async (cont
       `frame ${frame} lasted ${(expected * 1000).toFixed(1)} ms, the rider moved ${(advanced * 1000).toFixed(1)} ms`);
     previous = timestamp;
   }
+});
+
+test("on the main menu the rider waits at the top instead of riding off down the hill", async (context) => {
+  const loop = await startRiderLoop(context);
+  play(loop, 0.1, "idle");
+  const from = loop.updates.at(-1).state.position.downhill;
+  const waiting = play(loop, 3, "idle");
+
+  assert.ok(waiting.state.position.downhill - from < 0.05,
+    `the rider rode ${(waiting.state.position.downhill - from).toFixed(1)} m while the menu was up`);
+  assert.equal(waiting.state.speed, 0);
+  assert.ok(!waiting.state.crashed && waiting.pose.fall === 0);
+  // Still alive up there: time passes for them even though the hill does not.
+  assert.ok(waiting.state.elapsed > 2.5);
+
+  // The run starts with a reset, and then they go.
+  loop.game.events.dispatchEvent(new CustomEvent("rider:reset", { detail: { speed: 16 } }));
+  const riding = play(loop, 1, "running");
+  assert.ok(riding.state.position.downhill > 8 && riding.state.speed > 10);
+});
+
+test("when the run ends the rider goes down and stays down instead of riding away", async (context) => {
+  const loop = await startRiderLoop(context);
+  play(loop, 1, "running");
+  loop.game.events.dispatchEvent(new CustomEvent("rider:impact", { detail: { x: 1 } }));
+  const hit = loop.updates.at(-1).state.position.downhill;
+  const early = play(loop, 0.5, "crashed");
+  const settled = play(loop, 2.5, "crashed");
+  const later = play(loop, 4, "crashed");
+
+  assert.ok(early.state.crashed && early.pose.fall > 0.9, "not down half a second after the hit");
+  assert.ok(later.state.crashed && later.pose.fall > 0.9,
+    `six seconds on the rider is ${later.state.crashed ? "down" : "up and riding"} (fall ${later.pose.fall})`);
+  assert.ok(Math.abs(later.state.position.downhill - settled.state.position.downhill) < 0.05,
+    `the rider kept moving ${(later.state.position.downhill - settled.state.position.downhill).toFixed(1)} m`);
+  assert.ok(later.state.position.downhill - hit < 25);
+
+  // "Ride again" resets them onto their feet.
+  loop.game.events.dispatchEvent(new CustomEvent("rider:reset", { detail: { speed: 16 } }));
+  const again = play(loop, 1, "running");
+  assert.ok(!again.state.crashed && again.pose.fall === 0 && again.state.speed > 10);
 });

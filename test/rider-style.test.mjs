@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createRiderAnimator } from "../src/rider/animation.js";
-import { createRiderState, stepRider } from "../src/rider/physics.js";
+import { createRiderAnimator, getRiderPose } from "../src/rider/animation.js";
+import { crashRiderOnHazard, createRiderState, stepRider } from "../src/rider/physics.js";
 import { snowSurfaceHeight } from "../src/mountain/terrain3d.js";
 
 const FRAME = 1 / 60;
@@ -224,4 +224,66 @@ test("on the game's own rolling powder the rider still finds room for moves of t
   assert.ok(moves.length >= 2, `${moves.length} moves in 24 s of hands-off powder`);
   assert.ok(unsettled < 0.1,
     `the rider looked unsettled ${(unsettled * 100).toFixed(0)}% of the time just riding bumps`);
+});
+
+test("riding switch, the hands swap jobs: the one now leading does what the lead hand does", () => {
+  const regular = getRiderPose(createRiderState({ speed: 20, edge: 0.5, lean: 0.5 }));
+  const riding = getRiderPose(createRiderState({ speed: 20, edge: 0.5, lean: 0.5, switchRiding: true }));
+  const mirrored = getRiderPose(createRiderState({ speed: 20, edge: -0.5, lean: -0.5 }));
+
+  // Switch on the same edge of the hill is the mirror of riding regular on the other.
+  for (const hand of [0, 1]) {
+    for (const axis of ["x", "y", "out"]) {
+      // (to within the rider's small idle sway, which does not mirror)
+      assert.ok(Math.abs(riding.arms[hand][axis] - mirrored.arms[1 - hand][axis]) < 0.005,
+        `hand ${hand} ${axis}: ${riding.arms[hand][axis]} against ${mirrored.arms[1 - hand][axis]}`);
+    }
+  }
+  assert.notDeepEqual(riding.arms, regular.arms);
+});
+
+test("a crash goes down fast, stays down while the rider slides, then gets them back up", () => {
+  const animator = createRiderAnimator();
+  let state = createRiderState({ speed: 24, surface: "powder" });
+  for (let frame = 0; frame < 30; frame += 1) {
+    state = stepRider(state, {}, FRAME, { surface: "powder" });
+    animator.step(state, {}, FRAME);
+  }
+  const boardBefore = animator.step(state, {}, 0).boardYaw;
+  state = crashRiderOnHazard(state, { x: 1 });
+  const seen = [];
+  for (let frame = 0; frame < 150; frame += 1) {
+    state = stepRider(state, {}, FRAME, { surface: "powder" });
+    seen.push({ ...animator.step(state, {}, FRAME), crashed: state.crashed, time: frame * FRAME });
+  }
+  const at = (seconds) => seen[Math.round(seconds / FRAME)];
+
+  assert.ok(at(0.3).fall > 0.9, `0.3 s in the rider is only ${at(0.3).fall.toFixed(2)} of the way down`);
+  assert.ok(at(0.8).fall > 0.9);
+  assert.ok(at(1.5).fall < 0.75 && at(1.5).fall > 0.1, "not getting up by 1.5 s");
+  assert.ok(at(2.2).fall === 0 && !at(2.2).crashed, "not back up and riding by 2.2 s");
+  // Down and up are movements, not jumps.
+  const jump = Math.max(...seen.slice(1).map((pose, index) => Math.abs(pose.fall - seen[index].fall)));
+  assert.ok(jump < 0.12, `the fall jumped ${jump.toFixed(2)} in one frame`);
+  // The board goes down with the rider: it does not spin like a top under them.
+  const turned = Math.max(...seen.filter((pose) => pose.time < 1.2)
+    .map((pose) => Math.abs(Math.atan2(Math.sin(pose.boardYaw - boardBefore), Math.cos(pose.boardYaw - boardBefore)))));
+  assert.ok(turned < 0.25, `the board turned ${turned.toFixed(2)} rad under the fallen rider`);
+});
+
+test("what went wrong decides how the rider goes down", () => {
+  const kind = (overrides) => getRiderPose(createRiderState({ crashed: true, crashTimer: 1.6,
+    speed: 14, ...overrides })).fallKind;
+
+  // Hitting something, or catching the edge the chest is facing: thrown onto the front.
+  assert.equal(kind({ crashReason: "hazard", crashSpin: 1 }), "front");
+  assert.equal(kind({ crashReason: "edge-catch", crashSpin: 1, velocity: { across: 6, downhill: 10 } }), "front");
+  // Catching the edge behind the heels throws the rider onto their back.
+  assert.equal(kind({ crashReason: "edge-catch", crashSpin: -1, velocity: { across: -6, downhill: 10 } }), "back");
+  // Riding switch the heels are on the other side of the hill.
+  assert.equal(kind({ crashReason: "edge-catch", crashSpin: 1, switchRiding: true,
+    velocity: { across: 6, downhill: 10 } }), "back");
+  // A landing too hard for the legs just sits the rider down.
+  assert.equal(kind({ crashReason: "impact-overload", crashSpin: 1 }), "sit");
+  assert.equal(getRiderPose(createRiderState({ speed: 14 })).fallKind, "");
 });

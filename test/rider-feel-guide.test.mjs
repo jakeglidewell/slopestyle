@@ -152,10 +152,11 @@ test("a landing releases spin so the next terrain hop stays calm", () => {
   assert.equal(landed.spinVelocity, 0);
 });
 
-test("a crouched ground butter can carry a half turn into switch", () => {
+test("a crouched ground butter, held, can carry a half turn into switch", () => {
+  // It takes a couple of seconds of holding: a quick slide comes back regular.
   const butter = ride(
     createRiderState({ speed: 16, surface: "groomed" }),
-    32,
+    160,
     () => ({ crouch: 1, steer: 1 }),
     { surface: "groomed" },
   );

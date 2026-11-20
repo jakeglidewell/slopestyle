@@ -451,13 +451,14 @@ test("loading the tail before takeoff creates a stronger pop", () => {
   assert.ok(popped.verticalVelocity > unweighted.verticalVelocity);
 });
 
-test("landing sideways catches an edge", () => {
+test("landing sideways and hard catches an edge", () => {
+  // Hard: set down gently, even a sideways board is only a stumble.
   const state = stepRider(
     createRiderState({
       air: 0.03,
       boardYaw: 1.3,
       velocity: { across: 0, downhill: 14 },
-      verticalVelocity: -3,
+      verticalVelocity: -4.5,
     }),
     {},
     0.05,

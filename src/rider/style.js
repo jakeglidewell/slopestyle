@@ -17,8 +17,10 @@ const swell = (progress) => Math.sin(Math.PI * clamp(progress, 0, 1)) ** 2;
 export function armTargets({
   airborne = 0, airOpen = 0, airStyle = 0, collapse = 0, crouch = 0.3, drift = 0,
   elapsed = 0, float = 0, lead: leadExtra, lift = 0, speed = 0, stumble = 0,
-  sway = 0, swing = 0, tilt = 0, trail: trailExtra,
+  sway = 0, swing = 0, switchRiding = false, tilt = 0, trail: trailExtra,
 } = {}) {
+  // `lead` is whichever hand is going first: the other one when riding switch.
+  // `tilt` is positive toward the toes whichever way the rider is going.
   const lead = { ...REST_ARMS[0] };
   const trail = { ...REST_ARMS[1] };
   const low = Math.max(0, crouch - 0.3);
@@ -70,14 +72,15 @@ export function armTargets({
     // Both arms turn together about the spine, the way a positive board yaw turns.
     const cos = Math.cos(swing);
     const sin = Math.sin(swing);
-    for (const [arm, side] of [[lead, -1], [trail, 1]]) {
+    for (const [arm, side] of switchRiding ? [[lead, 1], [trail, -1]] : [[lead, -1], [trail, 1]]) {
       const across = side * (SHOULDER_SPAN + arm.out);
       const x = arm.x * cos - across * sin;
       arm.out = side * (arm.x * sin + across * cos) - SHOULDER_SPAN;
       arm.x = x;
     }
   }
-  return Object.freeze([Object.freeze(lead), Object.freeze(trail)]);
+  return Object.freeze(switchRiding ? [Object.freeze(trail), Object.freeze(lead)]
+    : [Object.freeze(lead), Object.freeze(trail)]);
 }
 
 /**
